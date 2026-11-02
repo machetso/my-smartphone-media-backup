@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1] - 2026-11-02
+
+### Features
+- Keeps the computer from going to standby or shutting down while a job runs (Linux and
+  Windows), without changing the power settings; can be switched off in the settings.
+- App icon (window, taskbar, Windows program file) and a Linux desktop/app-menu launcher
+  (`install-linux-desktop.sh`).
+
 ## [0.9.0] - 2026-11-02
 
 First public test version.

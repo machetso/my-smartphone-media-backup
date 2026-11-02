@@ -65,11 +65,14 @@ jobs:
       - name: Build program
         run: |
           EXTRA=""
+          SEP=":"
           if [ "$RUNNER_OS" = "Windows" ]; then
+            SEP=";"
             EXTRA="--hidden-import win32com.client --hidden-import pythoncom"
           fi
           python -m PyInstaller --noconfirm --clean --onefile --windowed \
             --name "${{ matrix.binary }}" --exclude-module tkinter $EXTRA \
+            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" \
             smartphone_media_backup.py
 
       - name: Package

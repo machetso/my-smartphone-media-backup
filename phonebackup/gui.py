@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
                                QVBoxLayout, QWidget)
 
 from . import APP_NAME, __version__, config, ui
+from .keepawake import KeepAwake, windows_block_shutdown
 from .backup import backup_parent_name, perform_backup
 from .export import Catalog, has_catalog, perform_export, perform_restore
 from .importer import check_import, perform_import
@@ -38,6 +39,19 @@ PHONE_FOLDER_ROOTS = ["DCIM", "Pictures", "Movies", "Download",
                       "Android/media/com.whatsapp/WhatsApp/Media"]
 
 GREEN, ORANGE, RED, GRAY = "#1f8a4c", "#c76a00", "#c62828", "#808080"
+
+
+DESKTOP_ID = "my-smartphone-media-backup"   # matches the .desktop file / icon name on Linux
+
+
+def app_icon():
+    """The app icon from assets/ (next to the code, or inside the PyInstaller program)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    for name in ("icon.ico", "icon.png") if sys.platform.startswith("win") else ("icon.png",):
+        p = base / "assets" / name
+        if p.is_file():
+            return QIcon(str(p))
+    return QIcon()
 
 
 def _com_init():
@@ -405,7 +419,8 @@ class MainWindow(QMainWindow):
         self._stop = threading.Event()
 
         self.setWindowTitle(f"{APP_NAME} {__version__}")
-        self.setWindowIcon(self.style().standardIcon(QStyle.SP_DriveHDIcon))
+        icon = app_icon()
+        self.setWindowIcon(icon if not icon.isNull() else self.style().standardIcon(QStyle.SP_DriveHDIcon))
         self.resize(1040, 860)
 
         self.tabs = QTabWidget()
@@ -592,7 +607,7 @@ class MainWindow(QMainWindow):
         self.last_folder = parents[0]
         ui.title(f"Import {src} into {Path(parents[0]).name}")
         self.run_job(lambda: perform_import(src, parents, self.cfg, interactive=True, cancel=self.cancel_event),
-                     self._import_done)
+                     self._import_done, awake="Import")
 
     def _import_done(self, res):
         status, paths, _results, verdict = res
@@ -690,6 +705,10 @@ class MainWindow(QMainWindow):
         self.fsync_check = QCheckBox("Force data onto the disk before verifying (safer, slightly slower)")
         self.fsync_check.setChecked(bool(self.cfg.get("fsync", True)))
         form.addRow("", self.fsync_check)
+        self.awake_check = QCheckBox("Keep the computer awake during backup, import, export and restore\n"
+                                     "(no standby or shutdown while a job runs; power settings stay unchanged)")
+        self.awake_check.setChecked(bool(self.cfg.get("keep_awake", True)))
+        form.addRow("", self.awake_check)
         save = QPushButton("Save settings")
         save.clicked.connect(self._save_settings)
         form.addRow("", save)
@@ -730,13 +749,21 @@ class MainWindow(QMainWindow):
         return w
 
     # ------------------------------------------------------------------ jobs
-    def run_job(self, func, on_done, busy=True):
+    def run_job(self, func, on_done, busy=True, awake=None):
+        """awake = name of a long job ("Backup", ...): the computer is kept from sleeping meanwhile."""
         if busy:
             self._set_busy(True)
+        keep = awake is not None and bool(self.cfg.get("keep_awake", True))
+        if keep:
+            windows_block_shutdown(self.winId(), True)
 
         def wrapper():
             try:
-                res, err = func(), None
+                # Entered in the worker thread: on Windows the execution state is per thread.
+                with KeepAwake(awake or "", enabled=keep) as ka:
+                    if keep:
+                        (ui.info if ka.active else ui.warn)(ka.message())
+                    res, err = func(), None
             except Exception:  # noqa: BLE001
                 res, err = None, traceback.format_exc()
             self.bridge.done.emit(on_done, res, err, busy)
@@ -746,6 +773,7 @@ class MainWindow(QMainWindow):
     def _on_done(self, on_done, res, err, busy):
         if busy:
             self._set_busy(False)
+        windows_block_shutdown(self.winId(), False)
         if err:
             self.connecting = False
             last = err.strip().splitlines()[-1]
@@ -980,7 +1008,7 @@ class MainWindow(QMainWindow):
             return perform_backup(src, phone, owner, folders, dests, self.cfg,
                                   interactive=True, cancel=self.cancel_event)
 
-        self.run_job(job, self._backup_done)
+        self.run_job(job, self._backup_done, awake="Backup")
 
     def _backup_done(self, res):
         status, paths, _results, verdict = res
@@ -1089,7 +1117,7 @@ class MainWindow(QMainWindow):
         self.last_folder = str(tparent)
         ui.title(f"Export ({mode}) of {src}")
         self.run_job(lambda: perform_export(src, tgt, mode, self.cfg, cancel=self.cancel_event),
-                     self._export_done)
+                     self._export_done, awake="Export")
 
     def _export_done(self, res):
         status, paths, verdict = res
@@ -1160,7 +1188,7 @@ class MainWindow(QMainWindow):
         self.last_folder = dest
         ui.title(f"Restore into {dest}")
         self.run_job(lambda: perform_restore(tparent, run_id, dest, self.cfg, cancel=self.cancel_event),
-                     self._restore_done)
+                     self._restore_done, awake="Restore")
 
     def _restore_done(self, res):
         status, paths, verdict = res
@@ -1176,6 +1204,7 @@ class MainWindow(QMainWindow):
         self.cfg["adb_path"] = self.adb_edit.text().strip()
         self.cfg["adb_wait_seconds"] = self.wait_spin.value()
         self.cfg["fsync"] = self.fsync_check.isChecked()
+        self.cfg["keep_awake"] = self.awake_check.isChecked()
         config.save(self.cfg)
         ui.ok("Settings saved.")
 
@@ -1216,6 +1245,14 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setDesktopFileName(DESKTOP_ID)   # Wayland: lets the desktop show our icon in the dock
+    app.setWindowIcon(app_icon())
+    if sys.platform.startswith("win"):
+        try:  # own taskbar group + icon instead of the generic python icon
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(DESKTOP_ID)
+        except Exception:  # noqa: BLE001
+            pass
     app.setStyle("Fusion")
     w = MainWindow()
     w.show()

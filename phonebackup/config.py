@@ -13,6 +13,7 @@ DEFAULTS = {
     "adb_path": "",              # empty = search PATH and ./platform-tools
     "adb_wait_seconds": 20,      # how long to wait for the phone to appear via ADB
     "fsync": True,               # force data onto the disk before verifying
+    "keep_awake": True,          # block standby/shutdown while a job runs
 }
 
 

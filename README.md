@@ -36,7 +36,18 @@ The window has four tabs:
 * **Second storage (export)** – pick the backup, the target drive and full / differential /
   incremental. Earlier exports are listed.
 * **Restore** – pick the export set, the state and the target folder.
-* **Settings** – adb path, waiting time, fsync.
+* **Settings** – adb path, waiting time, fsync, keep the computer awake.
+
+**Keep the computer awake:** while a backup, import, export or restore runs, the computer is
+kept from going to standby (on by default, switch off under *Settings*). The power settings
+themselves are not changed – the block ends automatically with the job, even after a crash.
+Linux: standby, idle suspend, closing the lid and a normal shutdown are blocked (logind
+inhibitor). Windows: sleep on inactivity is prevented and Windows asks before shutting down;
+closing the lid and the power button still follow the Windows power settings.
+
+**Desktop icon (Linux):** `./install-linux-desktop.sh` puts a start icon on the desktop and in
+the app menu (run it again after moving the folder, `--remove` takes it away again).
+The icons are built from `assets/PhoneBKP_Logo.webp` with `.venv/bin/python tools/make_icons.py`.
 
 The progress bar, speed, remaining time and the log are at the bottom, with *Cancel* (stops
 after the current file), *Open report* and *Open backup folder*.

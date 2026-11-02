@@ -9,6 +9,7 @@ from . import APP_NAME, __version__, config, ui
 from .backup import backup_parent_name, perform_backup
 from .export import MODES, Catalog, has_catalog, perform_export, perform_restore
 from .importer import perform_import
+from .keepawake import KeepAwake
 from .layout import same_volume
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, find_backups,
                         mount_device, mount_for_paths)
@@ -16,6 +17,14 @@ from .sources import connect_source
 
 PHONE_FOLDER_ROOTS = ["DCIM", "Pictures", "Movies", "Download",
                       "Android/media/com.whatsapp/WhatsApp/Media"]
+
+
+def _awake(cfg, what, func, *args):
+    """Run a long job while the computer is kept from going to standby / shutting down."""
+    with KeepAwake(what, enabled=bool(cfg.get("keep_awake", True))) as ka:
+        if ka.enabled:
+            (ui.info if ka.active else ui.warn)(ka.message())
+        return func(*args)
 
 
 def _describe(path):
@@ -147,7 +156,7 @@ def backup_menu(cfg):
     if not ui.ask_yes_no("Start the backup?", True):
         source.close()
         return
-    status, paths, _, _ = perform_backup(source, phone, owner, folders, dests, cfg)
+    status, paths, _, _ = _awake(cfg, "Backup", perform_backup, source, phone, owner, folders, dests, cfg)
     ui.info(f"\nStatus: {status}")
     for p in paths:
         if p.suffix == ".txt":
@@ -173,7 +182,7 @@ def import_menu(cfg):
     if not ui.ask_yes_no("Start the import?", True):
         return
     try:
-        status, paths, _, _ = perform_import(src, sets[name], cfg)
+        status, paths, _, _ = _awake(cfg, "Import", perform_import, src, sets[name], cfg)
     except ValueError as e:
         ui.error(str(e))
         return
@@ -219,7 +228,7 @@ def export_menu(cfg):
     if not ui.ask_yes_no(f"Start the {mode} export of {src} to {tparent}?", True):
         return
     try:
-        status, paths, _ = perform_export(src, target, mode, cfg)
+        status, paths, _ = _awake(cfg, "Export", perform_export, src, target, mode, cfg)
     except (ValueError, OSError) as e:
         ui.error(str(e))
         return
@@ -247,7 +256,7 @@ def restore_menu(cfg):
                              "overwritten. Continue?", False):
             return
     try:
-        status, paths, _ = perform_restore(tparent, runs[idx].id, dest, cfg)
+        status, paths, _ = _awake(cfg, "Restore", perform_restore, tparent, runs[idx].id, dest, cfg)
     except (ValueError, OSError) as e:
         ui.error(str(e))
         return
@@ -267,7 +276,8 @@ def settings_menu(cfg):
             f"Export targets ........ {len(cfg.get('export_targets', []))} saved (remove)",
             f"ADB program ........... {cfg.get('adb_path') or 'automatic'}",
             f"Wait for ADB phone .... {cfg.get('adb_wait_seconds')} s",
-            "Back"], default=7)
+            f"Keep computer awake ... {'yes' if cfg.get('keep_awake', True) else 'no'} (during jobs)",
+            "Back"], default=8)
         if idx == 0:
             cfg["owner"] = ui.ask("Owner name", cfg.get("owner") or None)
         elif idx == 1:
@@ -287,6 +297,9 @@ def settings_menu(cfg):
             v = ui.ask("Seconds", str(cfg.get("adb_wait_seconds", 20)))
             if v.isdigit():
                 cfg["adb_wait_seconds"] = int(v)
+        elif idx == 6:
+            cfg["keep_awake"] = ui.ask_yes_no("Keep the computer from standby/shutdown while a job runs?",
+                                              bool(cfg.get("keep_awake", True)))
         else:
             return
         config.save(cfg)
