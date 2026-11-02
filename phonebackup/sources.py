@@ -58,8 +58,10 @@ def find_adb(cfg):
         here = Path(sys.executable).resolve().parent
     else:
         here = Path(__file__).resolve().parent.parent
+    from .adbdownload import installed_adb
     candidates = [cfg.get("adb_path"), shutil.which("adb"),
                   str(here / "platform-tools" / exe),
+                  installed_adb(),                      # downloaded via Settings → Download ADB
                   str(Path.home() / "platform-tools" / exe)]
     if sys.platform.startswith("win"):
         la = os.environ.get("LOCALAPPDATA", "")

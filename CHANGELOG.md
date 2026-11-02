@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.3] - 2026-11-02
+
+### Features
+- *Settings → Download ADB…*: downloads Google's official platform-tools (adb) directly from
+  Google into the app's data folder and sets the path (Windows, Linux, macOS); the download is
+  checked (zip, safe paths, adb starts) before it replaces an older one.
+- Settings show which adb is used; mouse-over explanation of ADB and its speed advantage over
+  MTP (about 45–50 MB/s vs. typically 10–20 MB/s).
+
 ## [0.9.2] - 2026-11-02
 
 ### Fixes

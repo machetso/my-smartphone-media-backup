@@ -998,9 +998,36 @@ class MainWindow(QMainWindow):
         self.adb_edit.setPlaceholderText("empty = find automatically")
         b = QPushButton("Browse…")
         b.clicked.connect(self._browse_adb)
+        self.adb_download_btn = QPushButton("Download ADB…")
+        self.adb_download_btn.setToolTip("Downloads Google's official Android platform-tools (adb) "
+                                         "directly from Google and sets it up for this app.")
+        self.adb_download_btn.clicked.connect(self._download_adb)
         row.addWidget(self.adb_edit, 1)
         row.addWidget(b)
-        form.addRow("ADB program:", row)
+        row.addWidget(self.adb_download_btn)
+        adb_tip = (
+            "<b>ADB (Android Debug Bridge)</b> is Google's tool for talking to an Android phone over USB.<br>"
+            "The app uses it to find the phone, list its photos, check every file with SHA-256 "
+            "<i>on the phone</i> and copy quickly.<br><br>"
+            "<b>Leave empty</b>: adb is found automatically (next to the program in "
+            "<i>platform-tools</i>, on the system path, or in the Android SDK).<br>"
+            "Only enter a path if adb is somewhere else.<br><br>"
+            "ADB is much faster than MTP (the normal phone file transfer): about 45–50 MB/s over USB 3 "
+            "here, MTP typically 10–20 MB/s. Without ADB the app falls back to MTP, and the files can "
+            "then only be checked on the computer, not on the phone.<br>"
+            "On the phone: Developer options → USB debugging must be on.<br><br>"
+            "No adb yet? <b>Download ADB…</b> fetches Google's official platform-tools directly "
+            "from Google (one click, no installation, no admin rights).")
+        adb_label = QLabel("ADB program: ⓘ")
+        for wdg in (adb_label, self.adb_edit):
+            wdg.setToolTip(adb_tip)
+        form.addRow(adb_label, row)
+        self.adb_hint = adb_hint = QLabel()
+        self._update_adb_hint()
+        adb_hint.setWordWrap(True)
+        adb_hint.setStyleSheet(f"color:{GRAY}")
+        adb_hint.setToolTip(adb_tip)
+        form.addRow("", adb_hint)
         self.wait_spin = QSpinBox()
         self.wait_spin.setRange(1, 300)
         self.wait_spin.setSuffix(" s")
@@ -1499,6 +1526,47 @@ class MainWindow(QMainWindow):
         self._finished(status, paths, verdict, "Restore")
 
     # ------------------------------------------------------------------ settings / misc
+    def _update_adb_hint(self):
+        adb = find_adb({"adb_path": self.adb_edit.text().strip()})
+        found = (f"Found: {adb}" if adb else
+                 "No adb found – click “Download ADB…” (otherwise the slower MTP is used).")
+        self.adb_hint.setText(f"{found}\nLeave empty = found automatically. ADB is about 3× faster than "
+                              "MTP and lets the app check every file on the phone (hover for details).")
+
+    def _download_adb(self):
+        from .adbdownload import LICENSE_URL, download_adb, platform_name
+        box = QMessageBox(self)
+        box.setWindowTitle("Download ADB")
+        box.setIcon(QMessageBox.Question)
+        box.setTextFormat(Qt.RichText)
+        box.setTextInteractionFlags(Qt.TextBrowserInteraction)   # licence link clickable
+        box.setText(
+            "The app downloads Google's official <b>Android SDK Platform-Tools</b> "
+            f"for {'Windows' if platform_name() == 'windows' else platform_name().capitalize()} "
+            "(about 7–15 MB) directly from Google and keeps them in its own folder. "
+            "Nothing is installed in the system and no admin rights are needed.<br><br>"
+            "By downloading you accept Google's licence terms for the platform-tools:<br>"
+            f"<a href='{LICENSE_URL}'>{LICENSE_URL}</a>"
+            + ("<br><br>On Linux you can instead install adb with <tt>sudo apt install adb</tt>."
+               if platform_name() == "linux" else ""))
+        ok = box.addButton("Accept and download", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        if box.clickedButton() is not ok:
+            return
+        ui.title("Download ADB")
+        self.run_job(lambda: download_adb(cancel=self.cancel_event), self._adb_downloaded)
+
+    def _adb_downloaded(self, res):
+        path, version = res
+        self.adb_edit.setText(path)
+        self._save_settings()
+        self._update_adb_hint()
+        self.progress_label.setText("ADB downloaded")
+        QMessageBox.information(self, "Download ADB",
+                                f"ADB is ready:\n{path}\n{version}\n\nConnect the phone with USB debugging "
+                                "switched on and allow this computer on the phone.")
+
     def _browse_adb(self):
         p, _ = QFileDialog.getOpenFileName(self, "Choose the adb program")
         if p:
@@ -1510,6 +1578,8 @@ class MainWindow(QMainWindow):
         self.cfg["fsync"] = self.fsync_check.isChecked()
         self.cfg["keep_awake"] = self.awake_check.isChecked()
         config.save(self.cfg)
+        if hasattr(self, "adb_hint"):
+            self._update_adb_hint()
         ui.ok("Settings saved.")
 
     def _tab_changed(self, idx):

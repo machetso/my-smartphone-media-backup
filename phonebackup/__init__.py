@@ -2,4 +2,4 @@
 
 APP_NAME = "My Smartphone Media Backup"
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"

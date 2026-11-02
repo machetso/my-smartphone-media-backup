@@ -46,7 +46,13 @@ The window has four tabs:
 * **Second storage (export)** – pick the backup, the target drive and full / differential /
   incremental. Earlier exports are listed.
 * **Restore** – pick the export set, the state and the target folder.
-* **Settings** – adb path, waiting time, fsync, keep the computer awake.
+* **Settings** – adb path (normally empty = found automatically), waiting time, fsync, keep the
+  computer awake. Hover over a setting for an explanation.
+
+**Why ADB?** ADB (Android Debug Bridge, Google's USB tool for Android) is the fast and safe way:
+about 45–50 MB/s over a USB 3 cable (measured with a Pixel 10 Pro), while MTP - the normal
+"file transfer" mode - typically reaches 10–20 MB/s. With ADB every file is also checked with
+SHA-256 on the phone itself. If ADB does not work the app falls back to MTP and says so.
 
 **Keep the computer awake:** while a backup, import, export or restore runs, the computer is
 kept from going to standby (on by default, switch off under *Settings*). The power settings
@@ -119,7 +125,13 @@ sudo apt install adb
 adb devices          # should show your phone as "device"
 ```
 
-**Windows**
+**Easiest (Windows and Linux):** *Settings → Download ADB…* fetches Google's official
+platform-tools directly from Google into the app's own folder (Windows:
+`%LOCALAPPDATA%\phonebackup\platform-tools`, Linux: `~/.local/share/phonebackup/platform-tools`)
+and sets the path - no installation, no admin rights. adb is not shipped with the app because
+Google's licence does not allow passing it on.
+
+**Windows (by hand)**
 
 1. Download *SDK Platform-Tools for Windows* from
    https://developer.android.com/tools/releases/platform-tools
