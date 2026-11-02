@@ -149,7 +149,8 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
 
     taken, how = detect_date(good[0][1].path, sf.name, sf.mtime)
     res.taken, res.date_source = taken, how
-    reldir = relative_dir(taken, cat)
+    placement = getattr(source, "placement", None)
+    reldir = placement(sf, taken, cat) if placement else relative_dir(taken, cat)
 
     for d, w in good:
         try:
@@ -216,8 +217,9 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     for m in missing:
         ui.warn(f"  Folder not found {where}: {m or source.root}")
     supported, unsupported = [], []
+    classify = getattr(source, "category_of", None) or (lambda f: category_for(f.name))
     for sf in files:
-        cat = category_for(sf.name)
+        cat = classify(sf)
         (supported if cat else unsupported).append((sf, cat))
 
     todo, already = [], 0
@@ -232,7 +234,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     ui.info(f"  {len(supported)} photos/videos {where}, {already} already backed up, "
             f"{len(todo)} new ({ui.human_size(total_bytes)}).")
     if unsupported:
-        ui.info(f"  {len(unsupported)} other files are skipped (not photo/video).")
+        ui.info(f"  {len(unsupported)} other files are skipped "
+                f"({getattr(source, 'skip_text', 'not photo/video')}).")
 
     for d in dests:
         needed = sum(sf.size for sf, _, need in todo if d in need)
@@ -306,7 +309,7 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     secured = [r for r in results if r.ok and r.newly_written]
     duplicates = [r for r in results if r.ok and not r.newly_written]
     failed = [r for r in results if not r.ok]
-    by_cat = {c: [0, 0] for c in ("photo", "video", "raw")}
+    by_cat = {c: [0, 0] for c in CATEGORY_LABEL}
     for r in secured:
         by_cat[r.category][0] += 1
         by_cat[r.category][1] += r.sf.size
@@ -332,9 +335,11 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
 
     speed = total_b / duration if duration > 0 else 0
     if importing:
-        general = [("Imported folder", str(source.root)),
-                   ("Imported into backup", parent_name),
-                   ("Import date", f"{started:%Y-%m-%d}")]
+        general = [("Imported folder", getattr(source, "folders_text", "") or str(source.root))]
+        if phone_name:
+            general += [("Smartphone", phone_name), ("Owner", owner)]
+        general += [("Imported into backup", parent_name),
+                    ("Import date", f"{started:%Y-%m-%d}")]
     else:
         general = [("Smartphone", phone_name),
                    ("Owner", owner),
@@ -360,12 +365,16 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
         ("Photos", f"{by_cat['photo'][0]} files, {ui.human_size(by_cat['photo'][1])}"),
         ("Videos", f"{by_cat['video'][0]} files, {ui.human_size(by_cat['video'][1])}"),
         ("RAW", f"{by_cat['raw'][0]} files, {ui.human_size(by_cat['raw'][1])}"),
+    ] + [
+        (CATEGORY_LABEL[c] + " (other/)", f"{by_cat[c][0]} files, {ui.human_size(by_cat[c][1])}")
+        for c in ("other-photo", "other-video", "other-file") if by_cat[c][0]
+    ] + [
         ("Average speed", f"{ui.human_size(speed)}/s"),
         ("Photos/videos found " + ("in the source" if importing else "on phone"), str(n_supported)),
         ("Already backed up before (skipped)", str(already)),
         ("Identical duplicates (not stored twice)", str(len(duplicates))),
         ("Files with errors", str(len(failed))),
-        ("Other files skipped (not photo/video)", str(len(unsupported))),
+        (f"Other files skipped ({getattr(source, 'skip_text', 'not photo/video')})", str(len(unsupported))),
     ]
     dest_items = []
     for d in dests:
@@ -408,7 +417,8 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     for sf, _ in unsupported:
         n += 1
         rows.append([n, sf.name, "other", ui.human_size(sf.size), sf.size, "", "", sf.rel,
-                     "", ""] + ["skipped (not a photo/video file)", ""] * len(dests))
+                     "", ""] + [f"skipped ({getattr(source, 'skip_text', 'not a photo/video file')})",
+                                ""] * len(dests))
 
     if importing:
         title = f"Import {source_label} into {parent_name} - {started:%Y-%m-%d %H:%M}"

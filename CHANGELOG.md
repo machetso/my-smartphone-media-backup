@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.9.2] - 2026-11-02
+
+### Fixes
+- Linux: "Keep the computer awake" did not stop the automatic standby on COSMIC (and other
+  desktops whose idle timer suspends via `systemctl suspend`, which logind allows despite the
+  user's own block inhibitor). The desktop idle timer is now paused as well via the D-Bus
+  ScreenSaver / PowerManagement inhibit; the screen stays on while a job runs.
+
+### Features
+- Import an old phone as a backup of its own ("Import old backup" tab → *New backup of an old
+  phone*): enter the old phone's name and owner, add one or more folders (e.g. the copy of the
+  internal storage and of the SD card) and tick which folders to import. Every folder with
+  files is listed with its photo/video/other counts; app data (`Android/data`, `Android/obb`),
+  caches, thumbnails, trash and hidden folders are left out, system/temporary files
+  (`Thumbs.db`, `*.tmp`, …) are skipped and listed. Camera folders are pre-ticked and
+  sorted into the year/month and raw folders like a phone backup - recognised by DCIM / Camera /
+  100ANDRO… or, for self-sorted old backups (e.g. `jpgs/August 2023`, `RAW bis 8.5.23`), by
+  camera file names (`PXL_…`, `IMG_2017…`, `20170520_120000`, `DSC…`, …); other folders keep
+  their original folder name under
+  `Year/other/pictures | movies | other-files/`. Messenger and screenshot folders are listed
+  but not pre-ticked. Each folder can be switched between *Camera* and *Other*.
+- Import into an existing backup also accepts several folders and the same folder selection;
+  other files can optionally be imported there too.
+
 ## [0.9.1] - 2026-11-02
 
 ### Features

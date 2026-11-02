@@ -14,7 +14,9 @@ RAW_EXT = {".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2
 VIDEO_EXT = {".mp4", ".mov", ".3gp", ".3g2", ".mkv", ".webm", ".m4v", ".avi", ".mts", ".m2ts",
              ".mpg", ".mpeg", ".wmv", ".flv", ".vob", ".mod", ".tod", ".asf"}
 
-CATEGORY_LABEL = {"photo": "Photos", "video": "Videos", "raw": "RAW"}
+CATEGORY_LABEL = {"photo": "Photos", "video": "Videos", "raw": "RAW",
+                  "other-photo": "Other pictures", "other-video": "Other movies",
+                  "other-file": "Other files"}
 
 
 def category_for(name):

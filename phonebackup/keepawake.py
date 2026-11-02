@@ -4,9 +4,13 @@ The computer's power settings are NOT changed. Instead the operating system is t
 "a backup is running" for as long as the job takes, and everything returns to normal
 automatically when the job ends - even if the program crashes or is killed.
 
-* Linux: a logind inhibitor (systemd-inhibit) blocks suspend/hibernate, automatic idle
-  suspend, closing the laptop lid and a normal shutdown/reboot. The screen may still turn off
-  (that does not interrupt the backup).
+* Linux: a logind inhibitor (systemd-inhibit) blocks suspend/hibernate, closing the laptop
+  lid and a normal shutdown/reboot. In addition the desktop's own idle timer is paused via
+  D-Bus (org.freedesktop.ScreenSaver.Inhibit, plus org.freedesktop.PowerManagement.Inhibit
+  where it exists). This second part is essential: desktops like COSMIC suspend after idle
+  by running "systemctl suspend" as the user, and logind lets a user override their own block
+  inhibitors - only the desktop idle inhibit stops that. While it is held the screen stays on.
+  The D-Bus inhibit is tied to our connection, so it also ends if the program dies.
 * Windows: SetThreadExecutionState(ES_SYSTEM_REQUIRED) prevents sleep due to inactivity;
   the GUI additionally registers a shutdown-block reason, so Windows asks before shutting down.
   Closing the lid and pressing the power button still follow the Windows power settings.
@@ -38,6 +42,7 @@ class KeepAwake:
         self.active = False
         self.how = "disabled in the settings"
         self._proc = None
+        self._idle = []           # held desktop idle inhibits: (uninhibit function, objects to keep)
 
     # ------------------------------------------------------------------ public
     def __enter__(self):
@@ -59,6 +64,7 @@ class KeepAwake:
         return False
 
     def release(self):
+        self._release_idle()
         if not self.active:
             return
         self.active = False
@@ -94,6 +100,15 @@ class KeepAwake:
         self.how = "Windows sleep timer paused"
 
     def _start_linux(self):
+        idle = self._inhibit_desktop_idle()
+        self._start_logind()
+        if idle:
+            self.how = (self.how + "; " if self.active else "") + f"desktop idle timer paused ({idle})"
+            self.active = True
+        elif self.active:
+            self.how += "; desktop idle timer NOT paused (no D-Bus idle inhibit available)"
+
+    def _start_logind(self):
         exe = shutil.which("systemd-inhibit")
         if not exe:
             self.how = "systemd-inhibit not found"
@@ -117,6 +132,76 @@ class KeepAwake:
                 return
             err = (proc.stderr.read() or b"").decode(errors="replace").strip()
             self.how = err or f"systemd-inhibit exited with code {proc.returncode}"
+
+
+    # ---- desktop idle timer (D-Bus session bus)
+    _IDLE_SERVICES = [("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver",
+                       "org.freedesktop.ScreenSaver"),
+                      ("org.freedesktop.PowerManagement", "/org/freedesktop/PowerManagement/Inhibit",
+                       "org.freedesktop.PowerManagement.Inhibit")]
+
+    def _inhibit_desktop_idle(self):
+        """Returns a short description of what was inhibited, or "" if nothing worked."""
+        # GUI: Qt's own D-Bus connection. Terminal: dbus-python if installed, else QtDBus anyway.
+        backends = ([_qt_dbus_inhibit] if _qt_app_running() else []) + [_py_dbus_inhibit, _qt_dbus_inhibit]
+        names = []
+        for service, path, iface in self._IDLE_SERVICES:
+            held = None
+            for backend in backends:
+                try:
+                    held = backend(service, path, iface)
+                except Exception:  # noqa: BLE001 - service missing, no session bus, ...
+                    held = None
+                if held is not None:
+                    break
+            if held is not None:
+                self._idle.append(held)
+                names.append(service.rsplit(".", 1)[-1])
+        return ", ".join(names)
+
+    def _release_idle(self):
+        while self._idle:
+            uninhibit, _keep = self._idle.pop()
+            try:
+                uninhibit()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _qt_app_running():
+    try:
+        from PySide6.QtCore import QCoreApplication
+    except ImportError:
+        return False
+    return QCoreApplication.instance() is not None
+
+
+def _qt_dbus_inhibit(service, path, iface):
+    """Inhibit via PySide6 QtDBus (GUI). Returns (uninhibit function, objects to keep) or None."""
+    from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
+    bus = QDBusConnection.sessionBus()
+    if not bus.isConnected():
+        return None
+    proxy = QDBusInterface(service, path, iface, bus)
+    if not proxy.isValid():
+        return None
+    reply = proxy.call("Inhibit", WHO, WHY)
+    if reply.type() != QDBusMessage.ReplyMessage or not reply.arguments():
+        return None
+    cookie = int(reply.arguments()[0])
+    return (lambda: proxy.call("UnInhibit", cookie)), proxy
+
+
+def _py_dbus_inhibit(service, path, iface):
+    """Inhibit via dbus-python (terminal version), if it is installed."""
+    try:
+        import dbus  # type: ignore
+    except ImportError:
+        return None
+    bus = dbus.SessionBus()
+    proxy = dbus.Interface(bus.get_object(service, path), iface)
+    cookie = proxy.Inhibit(WHO, WHY)
+    return (lambda: proxy.UnInhibit(cookie)), (bus, proxy)
 
 
 # ---------------------------------------------------------------------- Windows shutdown dialog

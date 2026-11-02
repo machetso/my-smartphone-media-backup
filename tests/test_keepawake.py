@@ -19,6 +19,14 @@ class KeepAwakeTest(unittest.TestCase):
         if proc is not None:
             self.assertIsNotNone(proc.poll(), "inhibitor process must end after the job")
 
+    def test_desktop_idle_inhibit_is_released(self):
+        calls = []
+        ka = KeepAwake("Backup")
+        ka._idle = [(lambda: calls.append("un1"), None), (lambda: calls.append("un2"), None)]
+        ka.release()
+        self.assertEqual(sorted(calls), ["un1", "un2"])
+        self.assertEqual(ka._idle, [])
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux only")
     def test_exception_inside_job_releases(self):
         try:

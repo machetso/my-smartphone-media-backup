@@ -3,6 +3,7 @@
 <base>/<Phone - Owner>/2026/01.January-photos
                            /01.January-videos
                            /raw/01.January-raw
+                           /other/pictures|movies|other-files/<original folder>/   (old phone imports)
 """
 
 import os
@@ -13,6 +14,7 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 
 KIND = {"photo": "photos", "video": "videos", "raw": "raw"}
+OTHER_KIND = {"other-photo": "pictures", "other-video": "movies", "other-file": "other-files"}
 
 
 def month_folder(month, category):
@@ -25,6 +27,18 @@ def relative_dir(dt, category):
     if category == "raw":
         return Path(year) / "raw" / month_folder(dt.month, "raw")
     return Path(year) / month_folder(dt.month, category)
+
+
+def other_dir(dt, category, original_folder):
+    """Non-camera files of an old phone: <year>/other/pictures|movies|other-files/<original folder>.
+
+    original_folder is a relative path like "WhatsApp/Media/WhatsApp Images" (any separator).
+    """
+    d = Path(f"{dt.year:04d}") / "other" / OTHER_KIND[category]
+    for part in str(original_folder).replace("\\", "/").split("/"):
+        if part not in ("", ".", ".."):
+            d = d / safe_name(part)
+    return d
 
 
 _BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f]')

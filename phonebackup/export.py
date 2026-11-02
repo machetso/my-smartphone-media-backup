@@ -121,6 +121,8 @@ def scan_backup(parent):
 
 def _category(rel):
     r = rel.lower()
+    if r.split("/")[1:2] == ["other"]:
+        return "other"
     if "/raw/" in r:
         return "raw"
     if "-photos/" in r:

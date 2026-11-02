@@ -28,7 +28,8 @@ from . import APP_NAME, __version__, config, ui
 from .keepawake import KeepAwake, windows_block_shutdown
 from .backup import backup_parent_name, perform_backup
 from .export import Catalog, has_catalog, perform_export, perform_restore
-from .importer import check_import, perform_import
+from .importer import (CAMERA, OTHER, check_selection, guess_kind, perform_old_phone_import,
+                       perform_selection_import, scan_folder)
 from .layout import same_volume
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, drive_label_of,
                         find_backups, find_export_sets, free_space, is_backup_folder,
@@ -376,6 +377,101 @@ class FolderDialog(QDialog):
                 if self.list.item(i).checkState() == Qt.Checked]
 
 
+class ImportSelectionDialog(QDialog):
+    """Tick the folders of an old phone / old backup to import and choose how each is sorted."""
+
+    KINDS = [(CAMERA, "Camera → month folders"), (OTHER, "Other → other/… (original folder)")]
+
+    def __init__(self, parent, scans, choices):
+        """scans: {root: [FolderInfo]}, choices: {root: {rel: kind}} (the current selection)."""
+        super().__init__(parent)
+        self.setWindowTitle("Choose folders to import")
+        self.resize(980, 600)
+        self.scans = scans
+        lay = QVBoxLayout(self)
+        lab = QLabel(
+            "Every folder that contains files is listed (app data, caches, thumbnails, trash and hidden "
+            "folders are left out). Each ticked folder is imported with its own files; its sub-folders "
+            "are separate lines. <b>Camera</b> folders go into the year/month folders, <b>Other</b> folders "
+            "keep their original folder name under <i>year/other/pictures | movies | other-files</i>.")
+        lab.setWordWrap(True)
+        lay.addWidget(lab)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Folder", "Photos", "Videos", "Other files", "Size", "Sort as", "Note"])
+        h = self.tree.header()
+        h.setSectionResizeMode(0, QHeaderView.Stretch)
+        for c in range(1, 7):
+            h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        lay.addWidget(self.tree, 1)
+        self.combos = {}
+        for root, infos in scans.items():
+            top = QTreeWidgetItem([root])
+            top.setFlags(top.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
+            f = top.font(0)
+            f.setBold(True)
+            top.setFont(0, f)
+            self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
+            chosen = choices.get(root, {})
+            for info in infos:
+                it = QTreeWidgetItem(["(this folder itself)" if info.rel == "." else info.rel,
+                                      str(info.photos), str(info.videos), str(info.other),
+                                      ui.human_size(info.size), "", info.note])
+                for c in (1, 2, 3, 4):
+                    it.setTextAlignment(c, Qt.AlignRight | Qt.AlignVCenter)
+                it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                it.setCheckState(0, Qt.Checked if info.rel in chosen else Qt.Unchecked)
+                it.setData(0, Qt.UserRole, (root, info.rel))
+                top.addChild(it)
+                cb = QComboBox()
+                for k, text in self.KINDS:
+                    cb.addItem(text, k)
+                cb.setCurrentIndex(0 if chosen.get(info.rel, info.kind) == CAMERA else 1)
+                self.tree.setItemWidget(it, 5, cb)
+                self.combos[(root, info.rel)] = (it, cb, info)
+            if not infos:
+                top.addChild(QTreeWidgetItem(["no files found in this folder"]))
+            top.setExpanded(True)
+
+        row = QHBoxLayout()
+        for text, fn in (("Suggested", self._suggested), ("Tick all", lambda: self._tick(True)),
+                         ("Untick all", lambda: self._tick(False))):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch()
+        self.summary = QLabel()
+        row.addWidget(self.summary)
+        lay.addLayout(row)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.tree.itemChanged.connect(lambda *_: self._update_summary())
+        self._update_summary()
+
+    def _suggested(self):
+        for it, cb, info in self.combos.values():
+            it.setCheckState(0, Qt.Checked if info.suggested else Qt.Unchecked)
+            cb.setCurrentIndex(0 if info.kind == CAMERA else 1)
+
+    def _tick(self, on):
+        for it, _cb, _info in self.combos.values():
+            it.setCheckState(0, Qt.Checked if on else Qt.Unchecked)
+
+    def _update_summary(self):
+        ticked = [info for it, _cb, info in self.combos.values() if it.checkState(0) == Qt.Checked]
+        self.summary.setText(f"{len(ticked)} folders ticked, {sum(i.files for i in ticked)} files, "
+                             f"{ui.human_size(sum(i.size for i in ticked))}")
+
+    def choices(self):
+        out = {root: {} for root in self.scans}
+        for (root, rel), (it, cb, _info) in self.combos.items():
+            if it.checkState(0) == Qt.Checked:
+                out[root][rel] = cb.currentData()
+        return out
+
+
 def _group(title, widget_or_layout):
     g = QGroupBox(title)
     if isinstance(widget_or_layout, QWidget):
@@ -508,25 +604,52 @@ class MainWindow(QMainWindow):
     def _build_import_tab(self):
         w = QWidget()
         lay = QVBoxLayout(w)
-        info = QLabel(
-            "Adds the photos and videos of an old backup (or any folder) to one of your backups. "
-            "Everything is sorted into the same year/month folders, every file is checked with "
-            "SHA-256, identical files are stored only once (also against what is already in the "
-            "backup), and the old folder is only read – never changed. Files that are not photos "
-            "or videos are skipped and listed in the report.")
-        info.setWordWrap(True)
-        lay.addWidget(info)
+        self.import_scans, self.import_choices = {}, {}
 
-        row = QHBoxLayout()
-        self.import_src = QLineEdit()
-        self.import_src.setPlaceholderText("Folder of the old backup, e.g. /media/…/Fotos 2015-2020")
-        b = QPushButton("Browse…")
-        b.clicked.connect(self._browse_import_src)
-        row.addWidget(self.import_src, 1)
-        row.addWidget(b)
-        lay.addWidget(_group("Folder to import", row))
+        mode_row = QHBoxLayout()
+        self.imp_existing = QRadioButton("Add to an existing backup")
+        self.imp_new = QRadioButton("New backup of an old phone")
+        self.imp_existing.setChecked(True)
+        grp = QButtonGroup(w)
+        grp.addButton(self.imp_existing)
+        grp.addButton(self.imp_new)
+        self.imp_new.toggled.connect(self._import_mode_changed)
+        mode_row.addWidget(self.imp_existing)
+        mode_row.addWidget(self.imp_new)
+        mode_row.addStretch()
+        lay.addLayout(mode_row)
+        self.import_info = QLabel()
+        self.import_info.setWordWrap(True)
+        self.import_info.setStyleSheet(f"color:{GRAY}")
+        lay.addWidget(self.import_info)
 
-        v = QVBoxLayout()
+        src = QVBoxLayout()
+        self.import_roots = QTreeWidget()
+        self.import_roots.setHeaderLabels(["Folder", "Selected"])
+        self.import_roots.setRootIsDecorated(False)
+        self.import_roots.setMaximumHeight(120)
+        self.import_roots.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.import_roots.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.import_roots.itemDoubleClicked.connect(lambda *_: self._choose_import_folders())
+        src.addWidget(self.import_roots)
+        btns = QHBoxLayout()
+        for text, fn in (("Add folder…", self._add_import_root), ("Remove", self._remove_import_root),
+                         ("Choose folders to import…", self._choose_import_folders)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            btns.addWidget(b)
+        btns.addStretch()
+        src.addLayout(btns)
+        self.import_other_check = QCheckBox(
+            "Also import other files (documents, audio, …) – they keep their original folder "
+            "under year/other/other-files")
+        src.addWidget(self.import_other_check)
+        lay.addWidget(_group("Folders to import (one or more, e.g. the old phone and its SD card)", src))
+
+        # --- into an existing backup
+        self.import_existing_box = QWidget()
+        v = QVBoxLayout(self.import_existing_box)
+        v.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
         self.import_target = QComboBox()
         self.import_target.currentIndexChanged.connect(self._fill_import_copies)
@@ -541,13 +664,153 @@ class MainWindow(QMainWindow):
         v.addWidget(hint)
         self.import_copies = QListWidget()
         v.addWidget(self.import_copies)
-        lay.addWidget(_group("Import into backup", v), 1)
+        lay.addWidget(_group("Import into backup", self.import_existing_box), 1)
+        self.import_existing_group = self.import_existing_box.parentWidget()
+
+        # --- as a new backup of an old phone
+        self.import_new_box = QWidget()
+        v = QVBoxLayout(self.import_new_box)
+        v.setContentsMargins(0, 0, 0, 0)
+        form = QFormLayout()
+        self.import_phone_edit = QLineEdit()
+        self.import_phone_edit.setPlaceholderText("e.g. Galaxy S7")
+        self.import_owner_edit = QLineEdit(self.cfg.get("owner", ""))
+        self.import_owner_edit.setPlaceholderText("e.g. Sam")
+        form.addRow("Old phone name:", self.import_phone_edit)
+        form.addRow("Owner:", self.import_owner_edit)
+        v.addLayout(form)
+        self.import_dest_list = LocationList(
+            self.cfg, "destinations", "import_selected_destinations", True, "PhoneBackups",
+            "Tick the drive(s) to write the old phone's backup to – all ticked drives at the same time.")
+        self.import_dest_list.changed.connect(self._update_import_preview)
+        v.addWidget(self.import_dest_list, 1)
+        self.import_preview = QLabel()
+        self.import_preview.setWordWrap(True)
+        self.import_preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        v.addWidget(self.import_preview)
+        self.import_phone_edit.textChanged.connect(self._update_import_preview)
+        self.import_owner_edit.textChanged.connect(self._update_import_preview)
+        lay.addWidget(_group("New backup", self.import_new_box), 1)
+        self.import_new_group = self.import_new_box.parentWidget()
 
         self.start_import_btn = _big_button("Start import")
         self.start_import_btn.clicked.connect(self._start_import)
         lay.addWidget(self.start_import_btn, 0, Qt.AlignRight)
+        self._import_mode_changed()
         self._fill_import_targets()
         return w
+
+    def _import_new_mode(self):
+        return self.imp_new.isChecked()
+
+    def _import_mode_changed(self, *_):
+        new = self._import_new_mode()
+        self.import_existing_group.setVisible(not new)
+        self.import_new_group.setVisible(new)
+        self.import_other_check.setChecked(new)
+        if new:
+            self.import_info.setText(
+                "Makes a backup of its own for an old phone (folder “Phone - Owner” on the drive). Add "
+                "the copied folder(s) of the old phone, then choose which folders count: camera folders "
+                "are sorted into year/month folders like a real phone backup, all other ticked folders "
+                "(pictures, movies, other files) keep their original folder under year/other/. Every "
+                "file is checked with SHA-256, identical files are stored only once, and the old folders "
+                "are only read – never changed.")
+        else:
+            self.import_info.setText(
+                "Adds the photos and videos of an old backup (or any folders) to one of your backups. "
+                "Everything is sorted into the same year/month folders, every file is checked with "
+                "SHA-256, identical files are stored only once (also against what is already in the "
+                "backup), and the old folders are only read – never changed. Files that are not photos "
+                "or videos are skipped and listed in the report (unless “Also import other files” is ticked).")
+        # the suggestions differ between the two modes
+        for root, infos in self.import_scans.items():
+            for info in infos:
+                guess_kind(info.rel, info, into_existing=not new)
+            self.import_choices[root] = {i.rel: i.kind for i in infos if i.suggested}
+        self._fill_import_roots()
+        self._update_import_preview()
+
+    def _fill_import_roots(self):
+        self.import_roots.clear()
+        if not self.import_scans:
+            it = QTreeWidgetItem(["No folder added yet – click “Add folder…”", ""])
+            it.setFlags(Qt.NoItemFlags)
+            self.import_roots.addTopLevelItem(it)
+        for root, infos in self.import_scans.items():
+            chosen = self.import_choices.get(root, {})
+            ticked = [i for i in infos if i.rel in chosen]
+            cams = sum(1 for i in ticked if chosen[i.rel] == CAMERA)
+            text = (f"{len(ticked)} of {len(infos)} folders ({cams} camera, {len(ticked) - cams} other), "
+                    f"{sum(i.files for i in ticked)} files, {ui.human_size(sum(i.size for i in ticked))}")
+            it = QTreeWidgetItem([root, text])
+            it.setData(0, Qt.UserRole, root)
+            self.import_roots.addTopLevelItem(it)
+
+    def _scan_import_root(self, root):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ui.info(f"Reading the folders of {root} ...")
+            QApplication.processEvents()
+            infos = scan_folder(root, into_existing=not self._import_new_mode())
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.import_scans[root] = infos
+        self.import_choices[root] = {i.rel: i.kind for i in infos if i.suggested}
+        ui.info(f"  {len(infos)} folders with files, {len(self.import_choices[root])} suggested.")
+
+    def _add_import_root(self):
+        drives = detect_drives()
+        start = next(iter(self.import_scans), None) or (drives[0][0] if drives else str(Path.home()))
+        p = QFileDialog.getExistingDirectory(self, "Choose a folder to import (e.g. the copy of an old phone)",
+                                             start)
+        if not p:
+            return
+        p = str(Path(p).resolve())
+        for other in self.import_scans:
+            o = Path(other)
+            if Path(p) == o or o in Path(p).parents or Path(p) in o.parents:
+                QMessageBox.warning(self, "Folder already added",
+                                    f"{p}\noverlaps with the folder already in the list:\n{other}\n\n"
+                                    "Choose the sub-folders with “Choose folders to import…” instead.")
+                return
+        self._scan_import_root(p)
+        self._fill_import_roots()
+        self._choose_import_folders()
+
+    def _remove_import_root(self):
+        it = self.import_roots.currentItem()
+        root = it.data(0, Qt.UserRole) if it else None
+        if root:
+            self.import_scans.pop(root, None)
+            self.import_choices.pop(root, None)
+            self._fill_import_roots()
+
+    def _choose_import_folders(self):
+        if not self.import_scans:
+            self._add_import_root()
+            return
+        dlg = ImportSelectionDialog(self, self.import_scans, self.import_choices)
+        if dlg.exec() == QDialog.Accepted:
+            self.import_choices = dlg.choices()
+            self._fill_import_roots()
+
+    def _import_selections(self):
+        return [(root, rel, kind) for root, chosen in self.import_choices.items()
+                if root in self.import_scans for rel, kind in chosen.items()]
+
+    def _update_import_preview(self):
+        if not hasattr(self, "import_preview"):
+            return
+        phone = self.import_phone_edit.text().strip() or "<old phone>"
+        owner = self.import_owner_edit.text().strip() or "<owner>"
+        dests = self.import_dest_list.selected_paths()
+        base = Path(dests[0]) if dests else Path("<drive>")
+        parent = base / backup_parent_name(phone, owner)
+        self.import_preview.setText(
+            f"Camera folders → {parent / 'YEAR' / 'MM.Month-photos | -videos'}   (RAW → YEAR/raw/)\n"
+            f"Other folders → {parent / 'YEAR' / 'other' / 'pictures | movies | other-files'}"
+            f"/<original folder>")
 
     def _backup_sets(self):
         sets = {}
@@ -584,34 +847,75 @@ class MainWindow(QMainWindow):
             it.setData(Qt.UserRole, p)
             self.import_copies.addItem(it)
 
-    def _browse_import_src(self):
-        drives = detect_drives()
-        start = self.import_src.text().strip() or (drives[0][0] if drives else str(Path.home()))
-        p = QFileDialog.getExistingDirectory(self, "Choose the folder to import (e.g. an old backup)", start)
-        if p:
-            self.import_src.setText(p)
-
     def _start_import(self):
-        src = self.import_src.text().strip()
+        sel = self._import_selections()
+        other_files = self.import_other_check.isChecked()
+        if not self.import_scans:
+            QMessageBox.warning(self, "Cannot start yet", "Add the folder(s) to import.")
+            return
+        if not sel:
+            QMessageBox.warning(self, "Cannot start yet",
+                                "No folder is ticked – click “Choose folders to import…”.")
+            return
+        if self._import_new_mode():
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                self._mount_selected(self.import_dest_list)
+            finally:
+                QApplication.restoreOverrideCursor()
+            phone = self.import_phone_edit.text().strip()
+            owner = self.import_owner_edit.text().strip()
+            dests = self.import_dest_list.selected_available()
+            problems = []
+            if not phone:
+                problems.append("Enter the name of the old phone.")
+            if not owner:
+                problems.append("Enter the owner's name.")
+            if not dests:
+                problems.append("Tick at least one connected destination drive.")
+            if problems:
+                QMessageBox.warning(self, "Cannot start yet", "\n".join(problems))
+                return
+            name = backup_parent_name(phone, owner)
+            try:
+                check_selection(sel, [Path(d) / name for d in dests])
+            except ValueError as e:
+                QMessageBox.warning(self, "Cannot start yet", str(e))
+                return
+            existing = [d for d in dests if (Path(d) / name).is_dir()]
+            if existing and QMessageBox.question(
+                    self, "Backup already exists",
+                    f"There is already a backup “{name}” on\n" + "\n".join(existing) +
+                    "\n\nAdd the files to it? (Files already in it are not copied twice.)") \
+                    != QMessageBox.Yes:
+                return
+            self.last_folder = str(Path(dests[0]) / name)
+            ui.title(f"Import old phone {phone} – {owner}")
+            self.run_job(lambda: perform_old_phone_import(sel, phone, owner, dests, self.cfg,
+                                                          other_files=other_files, interactive=True,
+                                                          cancel=self.cancel_event),
+                         self._import_done, awake="Import")
+            return
+
         parents = [self.import_copies.item(i).data(Qt.UserRole) for i in range(self.import_copies.count())
                    if self.import_copies.item(i).data(Qt.UserRole)
                    and self.import_copies.item(i).checkState() == Qt.Checked]
-        if not src:
-            QMessageBox.warning(self, "Cannot start yet", "Choose the folder to import.")
-            return
         try:
-            check_import(src, parents)
+            check_selection(sel, parents)
         except ValueError as e:
             QMessageBox.warning(self, "Cannot start yet", str(e))
             return
         self.last_folder = parents[0]
-        ui.title(f"Import {src} into {Path(parents[0]).name}")
-        self.run_job(lambda: perform_import(src, parents, self.cfg, interactive=True, cancel=self.cancel_event),
+        ui.title(f"Import into {Path(parents[0]).name}")
+        self.run_job(lambda: perform_selection_import(sel, parents, self.cfg, other_files=other_files,
+                                                      interactive=True, cancel=self.cancel_event),
                      self._import_done, awake="Import")
 
     def _import_done(self, res):
         status, paths, _results, verdict = res
         self._finished(status, paths, verdict, "Import")
+        self._fill_import_targets()
+        self._fill_export_sources()
 
     def _build_export_tab(self):
         w = QWidget()
@@ -706,7 +1010,7 @@ class MainWindow(QMainWindow):
         self.fsync_check.setChecked(bool(self.cfg.get("fsync", True)))
         form.addRow("", self.fsync_check)
         self.awake_check = QCheckBox("Keep the computer awake during backup, import, export and restore\n"
-                                     "(no standby or shutdown while a job runs; power settings stay unchanged)")
+                                     "(no standby or shutdown while a job runs, the screen stays on; power settings stay unchanged)")
         self.awake_check.setChecked(bool(self.cfg.get("keep_awake", True)))
         form.addRow("", self.awake_check)
         save = QPushButton("Save settings")
@@ -1211,6 +1515,7 @@ class MainWindow(QMainWindow):
     def _tab_changed(self, idx):
         if idx == 1:
             self._fill_import_targets()
+            self.import_dest_list.rebuild()
         elif idx == 2:
             self._fill_export_sources()
         elif idx == 3:
@@ -1221,6 +1526,7 @@ class MainWindow(QMainWindow):
             return
         self.dest_list.update_status()
         self.export_targets.update_status()
+        self.import_dest_list.update_status()
         self._update_preview()
 
     def closeEvent(self, event):

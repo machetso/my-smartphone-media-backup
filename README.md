@@ -28,11 +28,21 @@ The window has four tabs:
   mounted with one click, no password). *Add folder…* opens a folder picker. A ticked drive
   that is attached but not mounted is mounted automatically when the backup starts. A preview shows exactly where the
   files will go. The phone is detected automatically as soon as it is plugged in via ADB.
-* **Import old backup** – adds an old backup or any folder (mixed photos, videos, RAW, nested
-  folders, duplicates) to an existing backup: sorted into the same year/month folders, every file
-  hashed at the source and verified after writing, identical files stored only once (also against
-  what is already in the backup), the old folder is only read. Non-media files are skipped and
-  listed in the report "Import <folder name> <date>".
+* **Import old backup** – two ways:
+  * *Add to an existing backup* – adds old backups or any folders (mixed photos, videos, RAW,
+    nested folders, duplicates) to one of your backups, sorted into the same year/month folders.
+  * *New backup of an old phone* – the old phone gets a backup of its own (“Galaxy S7 - Sam”):
+    enter phone name and owner and tick the destination drive(s).
+
+  Add one or more folders (e.g. the copy of the old phone and of its SD card) and click
+  *Choose folders to import…*: every folder with files is listed with its photos / videos /
+  other files; app data, caches, thumbnails, trash and hidden folders are left out. Tick the
+  folders and choose for each one *Camera* (→ year/month folders) or *Other* (→ keeps its
+  original folder under `Year/other/pictures | movies | other-files/`). For an old phone the
+  camera folders and normal picture/movie/download folders are pre-ticked, messenger and
+  screenshot folders are not. Every file is hashed at the source and verified after writing,
+  identical files are stored only once (also against what is already in the backup), the old
+  folders are only read. Skipped files are listed in the report “Import <name> <date>”.
 * **Second storage (export)** – pick the backup, the target drive and full / differential /
   incremental. Earlier exports are listed.
 * **Restore** – pick the export set, the state and the target folder.
@@ -42,7 +52,10 @@ The window has four tabs:
 kept from going to standby (on by default, switch off under *Settings*). The power settings
 themselves are not changed – the block ends automatically with the job, even after a crash.
 Linux: standby, idle suspend, closing the lid and a normal shutdown are blocked (logind
-inhibitor). Windows: sleep on inactivity is prevented and Windows asks before shutting down;
+inhibitor), and the desktop's own idle timer is paused (D-Bus `org.freedesktop.ScreenSaver`
+inhibit, like a video player does - needed on COSMIC and other desktops that suspend by
+themselves after inactivity). While a job runs the screen therefore stays on.
+Windows: sleep on inactivity is prevented and Windows asks before shutting down;
 closing the lid and the power button still follow the Windows power settings.
 
 **Desktop icon (Linux):** `./install-linux-desktop.sh` puts a start icon on the desktop and in
@@ -65,7 +78,8 @@ PhoneBackups/
     ├── 2026/
     │   ├── 01.January-photos/  …  12.December-photos/
     │   ├── 01.January-videos/  …  12.December-videos/
-    │   └── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
