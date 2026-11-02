@@ -49,7 +49,10 @@ def _q(s):
 
 def find_adb(cfg):
     exe = "adb.exe" if sys.platform.startswith("win") else "adb"
-    here = Path(__file__).resolve().parent.parent
+    if getattr(sys, "frozen", False):       # packaged program: look next to the .exe / binary
+        here = Path(sys.executable).resolve().parent
+    else:
+        here = Path(__file__).resolve().parent.parent
     candidates = [cfg.get("adb_path"), shutil.which("adb"),
                   str(here / "platform-tools" / exe),
                   str(Path.home() / "platform-tools" / exe)]

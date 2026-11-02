@@ -5,7 +5,7 @@ import shutil
 import sys
 import time
 
-if os.name == "nt":
+if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
     os.system("")  # enables ANSI colour codes in the Windows console
 
 _COLOR = sys.stdout is not None and sys.stdout.isatty()

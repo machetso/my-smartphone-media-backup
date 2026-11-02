@@ -5,7 +5,13 @@ external drives, sorted by year and month, with a report after every run.
 Python 3.8+, runs on Linux and Windows. The graphical interface needs PySide6; the terminal
 version needs no extra packages.
 
-## Start
+## Download
+
+Ready-to-run programs for Linux and Windows are on the
+[Releases page](../../releases) - no Python installation needed.
+See [CHANGELOG.md](CHANGELOG.md) for what is new.
+
+## Start from source
 
 **Graphical interface** (needs PySide6):
 
