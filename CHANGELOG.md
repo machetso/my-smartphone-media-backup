@@ -15,6 +15,13 @@ First public test version.
 - Report after every backup as TXT, HTML and CSV in the backup folder.
 - Fast ADB connection (about 50 MB/s over USB 3) with MTP fallback and a clear warning.
 - Export to a second storage as full, differential or incremental runs, plus restore.
+- Import of old backups or any folder into an existing backup ("Import old backup" tab):
+  mixed folders are sorted into the same year/month structure, every source file is hashed
+  separately and every copy is verified, identical files are stored only once (also against
+  what is already backed up), thumbnail/recycle-bin folders are ignored, non-media files are
+  skipped and listed, and the old folder is never changed. Running the same import again
+  copies nothing.
+- Older formats recognised: TIFF, BMP, AVI, MTS/M2TS, MPG, WMV, FLV, VOB and many RAW formats.
 - Graphical interface (drives and folders chosen with pickers; attached but unmounted
   drives are mounted with one click on Linux) and a terminal version.
 

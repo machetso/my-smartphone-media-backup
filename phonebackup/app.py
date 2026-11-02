@@ -8,6 +8,7 @@ from pathlib import Path
 from . import APP_NAME, __version__, config, ui
 from .backup import backup_parent_name, perform_backup
 from .export import MODES, Catalog, has_catalog, perform_export, perform_restore
+from .importer import perform_import
 from .layout import same_volume
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, find_backups,
                         mount_device, mount_for_paths)
@@ -155,6 +156,33 @@ def backup_menu(cfg):
 
 # ---------------------------------------------------------------- export / restore
 
+def import_menu(cfg):
+    ui.title("Import an old backup / any folder")
+    src = ui.ask("Folder to import (it is only read, never changed)")
+    sets = {}
+    for p in find_backups(cfg):
+        sets.setdefault(Path(p).name, []).append(p)
+    if not sets:
+        ui.error("No backup found on the connected drives - make a phone backup first.")
+        return
+    names = sorted(sets)
+    name = names[ui.choose("Import into which backup", names)]
+    ui.info("Copies that will be updated:")
+    for p in sets[name]:
+        ui.info(f"  {p}")
+    if not ui.ask_yes_no("Start the import?", True):
+        return
+    try:
+        status, paths, _, _ = perform_import(src, sets[name], cfg)
+    except ValueError as e:
+        ui.error(str(e))
+        return
+    ui.info(f"\nStatus: {status}")
+    for p in paths:
+        if p.suffix == ".txt":
+            ui.info(f"Report: {p}")
+
+
 def export_menu(cfg):
     ui.title("Export a backup to a second storage")
     backups = find_backups(cfg)
@@ -267,10 +295,10 @@ def settings_menu(cfg):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     cfg = config.load()
-    actions = {"backup": backup_menu, "export": export_menu, "restore": restore_menu,
+    actions = {"backup": backup_menu, "import": import_menu, "export": export_menu, "restore": restore_menu,
                "settings": settings_menu}
     if argv and argv[0] in ("-h", "--help"):
-        print("Usage: smartphone_media_backup.py [backup|export|restore|settings]")
+        print("Usage: smartphone_media_backup.py [backup|import|export|restore|settings]")
         return 0
     if argv and argv[0] in actions:
         actions[argv[0]](cfg)
@@ -278,13 +306,14 @@ def main(argv=None):
     while True:
         ui.title(f"{APP_NAME} {__version__}")
         idx = ui.choose("Choose", ["Backup phone -> external drive(s)",
+                                   "Import an old backup / any folder into a backup",
                                    "Export a backup to a second storage (full / differential / incremental)",
                                    "Restore from the second storage",
                                    "Settings",
                                    "Exit"], default=1)
-        if idx == 4:
+        if idx == 5:
             return 0
         try:
-            [backup_menu, export_menu, restore_menu, settings_menu][idx](cfg)
+            [backup_menu, import_menu, export_menu, restore_menu, settings_menu][idx](cfg)
         except KeyboardInterrupt:
             ui.warn("\nCancelled.")

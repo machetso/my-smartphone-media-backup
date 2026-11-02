@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from . import ui
-from .copier import CHUNK, file_chunks
+from .copier import CHUNK, file_chunks, sha256_file
 
 PHONE_ROOT = "/sdcard"
 _NO_WINDOW = 0x08000000 if sys.platform.startswith("win") else 0  # CREATE_NO_WINDOW
@@ -30,6 +30,11 @@ class SourceFile:
     rel: str        # path relative to the phone storage root, e.g. "DCIM/Camera/PXL_2026.jpg"
     size: int
     mtime: int
+    key: str = ""   # unique id in the backup database (imports: "import:<folder>/<rel>")
+
+    @property
+    def source_key(self):
+        return self.key or self.rel
 
     @property
     def name(self):
@@ -293,17 +298,26 @@ def _dedupe(files):
     return out
 
 
-class FolderSource:
-    """Any directory tree that looks like the phone storage (contains DCIM)."""
-    supports_phone_hash = False
+# Folders that never contain real photos (thumbnail caches, recycle bins, system folders).
+IMPORT_EXCLUDES = {"@eadir", "$recycle.bin", "recycler", "system volume information",
+                   ".thumbnails", "thumbs", ".trash", ".trashes", ".picasaoriginals",
+                   ".spotlight-v100", ".fseventsd", "lost+found"}
 
-    def __init__(self, root, kind="Folder", device_name="", description=""):
+
+class FolderSource:
+    """Any directory tree: the phone mounted via MTP, a card reader, or an old backup (import)."""
+
+    def __init__(self, root, kind="Folder", device_name="", description="",
+                 key_prefix="", verify_source=False, exclude_dirs=()):
         self.root = Path(root)
         self.kind = kind
         self.device_name = device_name
         self.serial = ""
         self.description = description or str(self.root)
         self.fallback_reason = None
+        self.key_prefix = key_prefix
+        self.supports_phone_hash = verify_source      # hash every source file separately
+        self.exclude_dirs = {d.lower() for d in exclude_dirs}
 
     def list_subfolders(self, rel):
         base = self.root / rel
@@ -322,7 +336,8 @@ class FolderSource:
                 missing.append(rel)
                 continue
             for dirpath, dirnames, filenames in os.walk(base):
-                dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+                dirnames[:] = sorted(d for d in dirnames
+                                     if not d.startswith(".") and d.lower() not in self.exclude_dirs)
                 for fn in sorted(filenames):
                     if fn.startswith("."):
                         continue
@@ -332,11 +347,21 @@ class FolderSource:
                     except OSError:
                         continue
                     r = full.relative_to(self.root).as_posix()
-                    files.append(SourceFile(r, st.st_size, int(st.st_mtime)))
+                    files.append(SourceFile(r, st.st_size, int(st.st_mtime),
+                                            self.key_prefix + r if self.key_prefix else ""))
         return _dedupe(files), missing
 
     def phone_hashes(self, rels):
-        return {}
+        """Independent SHA-256 of the source files (only used for imports)."""
+        if not self.supports_phone_hash:
+            return {}
+        out = {}
+        for r in rels:
+            try:
+                out[r] = sha256_file(self.root / r)
+            except OSError:
+                pass
+        return out
 
     def open_stream(self, sf):
         return file_chunks(self.root / sf.rel)

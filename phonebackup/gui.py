@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 from . import APP_NAME, __version__, config, ui
 from .backup import backup_parent_name, perform_backup
 from .export import Catalog, has_catalog, perform_export, perform_restore
+from .importer import check_import, perform_import
 from .layout import same_volume
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, drive_label_of,
                         find_backups, find_export_sets, free_space, is_backup_folder,
@@ -409,6 +410,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_backup_tab(), "Backup")
+        self.tabs.addTab(self._build_import_tab(), "Import old backup")
         self.tabs.addTab(self._build_export_tab(), "Second storage (export)")
         self.tabs.addTab(self._build_restore_tab(), "Restore")
         self.tabs.addTab(self._build_settings_tab(), "Settings")
@@ -487,6 +489,114 @@ class MainWindow(QMainWindow):
         self.start_backup_btn.clicked.connect(self._start_backup)
         lay.addWidget(self.start_backup_btn, 0, Qt.AlignRight)
         return w
+
+    def _build_import_tab(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        info = QLabel(
+            "Adds the photos and videos of an old backup (or any folder) to one of your backups. "
+            "Everything is sorted into the same year/month folders, every file is checked with "
+            "SHA-256, identical files are stored only once (also against what is already in the "
+            "backup), and the old folder is only read – never changed. Files that are not photos "
+            "or videos are skipped and listed in the report.")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        row = QHBoxLayout()
+        self.import_src = QLineEdit()
+        self.import_src.setPlaceholderText("Folder of the old backup, e.g. /media/…/Fotos 2015-2020")
+        b = QPushButton("Browse…")
+        b.clicked.connect(self._browse_import_src)
+        row.addWidget(self.import_src, 1)
+        row.addWidget(b)
+        lay.addWidget(_group("Folder to import", row))
+
+        v = QVBoxLayout()
+        top = QHBoxLayout()
+        self.import_target = QComboBox()
+        self.import_target.currentIndexChanged.connect(self._fill_import_copies)
+        refresh = QPushButton("Refresh")
+        refresh.setToolTip("Search the saved backup drives again (attached drives are mounted)")
+        refresh.clicked.connect(lambda: self._fill_import_targets(mount=True))
+        top.addWidget(self.import_target, 1)
+        top.addWidget(refresh)
+        v.addLayout(top)
+        hint = QLabel("Copies of this backup on your drives – all ticked copies are updated at the same time:")
+        hint.setStyleSheet(f"color:{GRAY}")
+        v.addWidget(hint)
+        self.import_copies = QListWidget()
+        v.addWidget(self.import_copies)
+        lay.addWidget(_group("Import into backup", v), 1)
+
+        self.start_import_btn = _big_button("Start import")
+        self.start_import_btn.clicked.connect(self._start_import)
+        lay.addWidget(self.start_import_btn, 0, Qt.AlignRight)
+        self._fill_import_targets()
+        return w
+
+    def _backup_sets(self):
+        sets = {}
+        for p in find_backups(self.cfg):
+            sets.setdefault(Path(p).name, []).append(p)
+        return sets
+
+    def _fill_import_targets(self, mount=False):
+        if mount:
+            for m in mount_for_paths(self.cfg.get("destinations", [])):
+                (ui.ok if m.startswith("Mounted") else ui.warn)(m)
+        cur = self.import_target.currentText()
+        self.import_target.blockSignals(True)
+        self.import_target.clear()
+        for name in sorted(self._backup_sets()):
+            self.import_target.addItem(name)
+        idx = self.import_target.findText(cur) if cur else -1
+        self.import_target.setCurrentIndex(idx if idx >= 0 else 0)
+        self.import_target.blockSignals(False)
+        self._fill_import_copies()
+
+    def _fill_import_copies(self):
+        self.import_copies.clear()
+        copies = self._backup_sets().get(self.import_target.currentText(), [])
+        if not copies:
+            it = QListWidgetItem("No backup found on the connected drives – make a phone backup first, "
+                                 "or connect the drives and click Refresh.")
+            it.setFlags(Qt.NoItemFlags)
+            self.import_copies.addItem(it)
+        for p in copies:
+            it = QListWidgetItem(p)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked)
+            it.setData(Qt.UserRole, p)
+            self.import_copies.addItem(it)
+
+    def _browse_import_src(self):
+        drives = detect_drives()
+        start = self.import_src.text().strip() or (drives[0][0] if drives else str(Path.home()))
+        p = QFileDialog.getExistingDirectory(self, "Choose the folder to import (e.g. an old backup)", start)
+        if p:
+            self.import_src.setText(p)
+
+    def _start_import(self):
+        src = self.import_src.text().strip()
+        parents = [self.import_copies.item(i).data(Qt.UserRole) for i in range(self.import_copies.count())
+                   if self.import_copies.item(i).data(Qt.UserRole)
+                   and self.import_copies.item(i).checkState() == Qt.Checked]
+        if not src:
+            QMessageBox.warning(self, "Cannot start yet", "Choose the folder to import.")
+            return
+        try:
+            check_import(src, parents)
+        except ValueError as e:
+            QMessageBox.warning(self, "Cannot start yet", str(e))
+            return
+        self.last_folder = parents[0]
+        ui.title(f"Import {src} into {Path(parents[0]).name}")
+        self.run_job(lambda: perform_import(src, parents, self.cfg, interactive=True, cancel=self.cancel_event),
+                     self._import_done)
+
+    def _import_done(self, res):
+        status, paths, _results, verdict = res
+        self._finished(status, paths, verdict, "Import")
 
     def _build_export_tab(self):
         w = QWidget()
@@ -1071,8 +1181,10 @@ class MainWindow(QMainWindow):
 
     def _tab_changed(self, idx):
         if idx == 1:
-            self._fill_export_sources()
+            self._fill_import_targets()
         elif idx == 2:
+            self._fill_export_sources()
+        elif idx == 3:
             self._fill_restore_sets()
 
     def _periodic(self):

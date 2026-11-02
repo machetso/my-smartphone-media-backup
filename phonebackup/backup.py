@@ -98,19 +98,19 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
             raise
         except Exception as e:  # noqa: BLE001
             stream_sha, n, wres = None, -1, None
-            last_err = f"reading from phone failed: {e}"
+            last_err = f"reading from the source failed: {e}"
         if stream_sha is not None and n != sf.size:
             last_err = f"incomplete transfer ({n} of {sf.size} bytes)"
             stream_sha = None
         if stream_sha is not None and hasher is not None:
             phone_sha = hasher.get(sf.rel)
             if phone_sha is None:
-                res.transfer_check = "n/a (phone could not hash this file)"
+                res.transfer_check = "n/a (source could not hash this file)"
             elif phone_sha != stream_sha:
-                last_err = "MISMATCH between phone hash and received data"
+                last_err = "MISMATCH between source hash and received data"
                 stream_sha = None
             else:
-                res.transfer_check = "OK (SHA-256 on phone = received)"
+                res.transfer_check = "OK (SHA-256 at source = received)"
         elif stream_sha is not None:
             res.transfer_check = (f"n/a ({source.kind}: no hash on the phone; "
                                   "copies compared with the received data)")
@@ -156,7 +156,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
             existing = d.index.find_by_sha(stream_sha)
             if existing:
                 _remove(w.path)
-                d.index.add(sf.rel, sf.size, sf.mtime, stream_sha, existing, cat, taken, how)
+                d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, existing, cat, taken, how)
                 res.per_dest[d.label] = ("DUPLICATE: identical file already in backup", existing)
                 continue
             final = d.parent / reldir / safe_name(sf.name)
@@ -165,7 +165,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
                 if final.stat().st_size == sf.size and sha256_file(final) == stream_sha:
                     _remove(w.path)
                     rel = final.relative_to(d.parent).as_posix()
-                    d.index.add(sf.rel, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
+                    d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
                     res.per_dest[d.label] = ("DUPLICATE: identical file already in backup", rel)
                     continue
                 final = unique_path(final)
@@ -178,7 +178,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
                 except OSError:
                     pass
             rel = final.relative_to(d.parent).as_posix()
-            d.index.add(sf.rel, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
+            d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
             d.written += 1
             d.written_bytes += sf.size
             res.per_dest[d.label] = (status, rel)
@@ -190,11 +190,16 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
     return res
 
 
-def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interactive=True, cancel=None):
-    """Run one backup. Returns (status, report paths, file results, verdict text)."""
+def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interactive=True, cancel=None,
+                   parent_name=None, mode="backup", source_label=""):
+    """Run one backup (or, with mode="import", an import of a folder into an existing backup).
+
+    Returns (status, report paths, file results, verdict text).
+    """
     started = datetime.now()
     t0 = time.monotonic()
-    parent_name = backup_parent_name(phone_name, owner)
+    where = "in the source folder" if mode == "import" else "on the phone"
+    parent_name = parent_name or backup_parent_name(phone_name, owner)
     dests = []
     for i, base in enumerate(dest_bases, 1):
         parent = Path(base) / parent_name
@@ -206,10 +211,10 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     if hasattr(source, "staging"):
         source.staging = dests[0].parent / INTERNAL_DIR / "staging"
 
-    ui.info("Reading the file list from the phone ...")
+    ui.info(f"Reading the file list {'of the source folder' if mode == 'import' else 'from the phone'} ...")
     files, missing = source.list_files(folders)
     for m in missing:
-        ui.warn(f"  Folder not found on the phone: {m}")
+        ui.warn(f"  Folder not found {where}: {m or source.root}")
     supported, unsupported = [], []
     for sf in files:
         cat = category_for(sf.name)
@@ -217,14 +222,14 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
 
     todo, already = [], 0
     for sf, cat in supported:
-        need = [d for d in dests if not d.index.has(sf.rel, sf.size)]
+        need = [d for d in dests if not d.index.has(sf.source_key, sf.size)]
         if need:
             todo.append((sf, cat, need))
         else:
             already += 1
     total_bytes = sum(sf.size for sf, _, _ in todo)
 
-    ui.info(f"  {len(supported)} photos/videos on the phone, {already} already backed up, "
+    ui.info(f"  {len(supported)} photos/videos {where}, {already} already backed up, "
             f"{len(todo)} new ({ui.human_size(total_bytes)}).")
     if unsupported:
         ui.info(f"  {len(unsupported)} other files are skipped (not photo/video).")
@@ -269,7 +274,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
                 status = "ABORTED (no destination drive left)"
                 break
             if not r.ok and r.transfer_check.startswith("ERROR") and not source.is_connected():
-                status = "ABORTED (phone disconnected)"
+                status = ("ABORTED (source folder no longer reachable)" if mode == "import"
+                          else "ABORTED (phone disconnected)")
                 break
     except (KeyboardInterrupt, Cancelled):
         status = "CANCELLED by user"
@@ -286,15 +292,17 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     finished = datetime.now()
     duration = time.monotonic() - t0
     paths, verdict = _write_backup_reports(source, phone_name, owner, folders, missing, dests, results,
-                                  unsupported, len(supported), already, status, started,
-                                  finished, duration)
+                                           unsupported, len(supported), already, status, started,
+                                           finished, duration, mode, source_label, parent_name)
     for d in dests:
         d.index.close()
     return status, paths, results, verdict
 
 
 def _write_backup_reports(source, phone_name, owner, folders, missing, dests, results,
-                          unsupported, n_supported, already, status, started, finished, duration):
+                          unsupported, n_supported, already, status, started, finished, duration,
+                          mode="backup", source_label="", parent_name=""):
+    importing = mode == "import"
     secured = [r for r in results if r.ok and r.newly_written]
     duplicates = [r for r in results if r.ok and not r.newly_written]
     failed = [r for r in results if not r.ok]
@@ -309,6 +317,8 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     if all_ok:
         verdict = (f"EVERYTHING COPIED CORRECTLY - {total_n} new files ({ui.human_size(total_b)}) "
                    f"secured and verified with SHA-256 on {len(dests)} destination(s).")
+        if duplicates:
+            verdict += f" {len(duplicates)} identical duplicate(s) were recognised and not stored twice."
     else:
         problems = []
         if status != "COMPLETED":
@@ -321,20 +331,27 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
         verdict = "ATTENTION - " + "; ".join(problems)
 
     speed = total_b / duration if duration > 0 else 0
-    general = [
-        ("Smartphone", phone_name),
-        ("Owner", owner),
-        ("Backup date", f"{started:%Y-%m-%d}"),
+    if importing:
+        general = [("Imported folder", str(source.root)),
+                   ("Imported into backup", parent_name),
+                   ("Import date", f"{started:%Y-%m-%d}")]
+    else:
+        general = [("Smartphone", phone_name),
+                   ("Owner", owner),
+                   ("Backup date", f"{started:%Y-%m-%d}")]
+    general += [
         ("Status", status),
         ("Started", f"{started:%Y-%m-%d %H:%M:%S}"),
         ("Finished", f"{finished:%Y-%m-%d %H:%M:%S}"),
         ("Duration", ui.human_duration(duration)),
-        ("Connection", f"{source.kind} - {source.description}"),
     ]
+    if not importing:
+        general.append(("Connection", f"{source.kind} - {source.description}"))
     if getattr(source, "fallback_reason", None):
         general.append(("ADB fallback", f"ADB did not work ({source.fallback_reason}); "
                                         f"{source.kind} was used instead"))
-    general.append(("Folders on phone", ", ".join(folders)))
+    if not importing:
+        general.append(("Folders on phone", ", ".join(folders)))
     if missing:
         general.append(("Folders NOT found", ", ".join(missing)))
 
@@ -344,7 +361,7 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
         ("Videos", f"{by_cat['video'][0]} files, {ui.human_size(by_cat['video'][1])}"),
         ("RAW", f"{by_cat['raw'][0]} files, {ui.human_size(by_cat['raw'][1])}"),
         ("Average speed", f"{ui.human_size(speed)}/s"),
-        ("Photos/videos found on phone", str(n_supported)),
+        ("Photos/videos found " + ("in the source" if importing else "on phone"), str(n_supported)),
         ("Already backed up before (skipped)", str(already)),
         ("Identical duplicates (not stored twice)", str(len(duplicates))),
         ("Files with errors", str(len(failed))),
@@ -361,7 +378,9 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
                        (f"{d.label} this run", f"{d.written} files written, {ui.human_size(d.written_bytes)}, "
                                                f"{d.errors} errors"),
                        (f"{d.label} whole backup", content or "empty")]
-    method = [("Phone -> computer", "SHA-256 calculated on the phone and compared with the received data"
+    method = [("Source -> computer" if importing else "Phone -> computer",
+               ("SHA-256 of every source file calculated separately and compared with the copied data"
+                if importing else "SHA-256 calculated on the phone and compared with the received data")
                if source.supports_phone_hash else
                f"{source.kind}: SHA-256 of the received data (no hash possible on the phone "
                "with this connection)"),
@@ -371,7 +390,8 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     sections = [("General", general), ("Data secured", data), ("Destinations", dest_items),
                 ("Verification method", method)]
 
-    columns = ["Nr", "File", "Type", "Size", "Bytes", "Date taken", "Date from", "Phone path",
+    columns = ["Nr", "File", "Type", "Size", "Bytes", "Date taken", "Date from",
+               "Path in source" if importing else "Phone path",
                "Transfer check", "SHA-256"]
     for d in dests:
         columns += [f"{d.label} status", f"{d.label} location"]
@@ -390,13 +410,18 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
         rows.append([n, sf.name, "other", ui.human_size(sf.size), sf.size, "", "", sf.rel,
                      "", ""] + ["skipped (not a photo/video file)", ""] * len(dests))
 
-    title = f"Backup {phone_name} - {owner} - {started:%Y-%m-%d %H:%M}"
+    if importing:
+        title = f"Import {source_label} into {parent_name} - {started:%Y-%m-%d %H:%M}"
+        report_base = f"Import {source_label}"
+    else:
+        title = f"Backup {phone_name} - {owner} - {started:%Y-%m-%d %H:%M}"
+        report_base = f"Backup {phone_name} {owner}"
     paths = []
     basename = None
     for d in dests:
         try:
             if basename is None or (d.parent / (basename + ".txt")).exists():
-                basename = unique_basename(d.parent, f"Backup {phone_name} {owner}", started)
+                basename = unique_basename(d.parent, report_base, started)
             paths += write_reports(d.parent, basename, title, all_ok, verdict, sections, columns, rows)
         except OSError as e:
             ui.error(f"Could not write report to {d.parent}: {e}")

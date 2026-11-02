@@ -28,6 +28,11 @@ The window has four tabs:
   mounted with one click, no password). *Add folder…* opens a folder picker. A ticked drive
   that is attached but not mounted is mounted automatically when the backup starts. A preview shows exactly where the
   files will go. The phone is detected automatically as soon as it is plugged in via ADB.
+* **Import old backup** – adds an old backup or any folder (mixed photos, videos, RAW, nested
+  folders, duplicates) to an existing backup: sorted into the same year/month folders, every file
+  hashed at the source and verified after writing, identical files stored only once (also against
+  what is already in the backup), the old folder is only read. Non-media files are skipped and
+  listed in the report "Import <folder name> <date>".
 * **Second storage (export)** – pick the backup, the target drive and full / differential /
   incremental. Earlier exports are listed.
 * **Restore** – pick the export set, the state and the target folder.

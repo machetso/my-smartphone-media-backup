@@ -8,9 +8,11 @@ import re
 import struct
 from datetime import datetime
 
-PHOTO_EXT = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".webp", ".gif", ".avif"}
-RAW_EXT = {".dng", ".cr2", ".cr3", ".nef", ".arw", ".raf", ".orf", ".rw2", ".pef", ".srw"}
-VIDEO_EXT = {".mp4", ".mov", ".3gp", ".mkv", ".webm", ".m4v", ".avi"}
+PHOTO_EXT = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".webp", ".gif", ".avif", ".tif", ".tiff", ".bmp"}
+RAW_EXT = {".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".raf", ".orf",
+           ".rw2", ".pef", ".srw", ".x3f", ".3fr", ".erf", ".kdc", ".mrw", ".raw", ".rwl", ".iiq"}
+VIDEO_EXT = {".mp4", ".mov", ".3gp", ".3g2", ".mkv", ".webm", ".m4v", ".avi", ".mts", ".m2ts",
+             ".mpg", ".mpeg", ".wmv", ".flv", ".vob", ".mod", ".tod", ".asf"}
 
 CATEGORY_LABEL = {"photo": "Photos", "video": "Videos", "raw": "RAW"}
 
@@ -243,9 +245,9 @@ def detect_date(local_path, name, source_mtime):
             dt = _jpeg_exif(local_path) or _scan_exif(local_path, 1024 * 1024)
         elif ext in (".heic", ".heif", ".avif", ".webp", ".png"):
             dt = _scan_exif(local_path)
-        elif ext in RAW_EXT:
+        elif ext in RAW_EXT or ext in (".tif", ".tiff"):
             dt = _tiff_file(local_path) or _scan_exif(local_path)
-        elif ext in (".mp4", ".mov", ".3gp", ".m4v"):
+        elif ext in (".mp4", ".mov", ".3gp", ".3g2", ".m4v"):
             dt = mp4_datetime(local_path)
     except (OSError, struct.error, ValueError):
         dt = None
