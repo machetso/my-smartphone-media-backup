@@ -233,9 +233,10 @@ computer) offers **1. Download the app** (open the file, tap *Install*) and **2.
 Phone and computer show the same 6-digit code - confirm it on the computer. Done once.
 
 For a backup: open *Fast Media Backup* on the phone → **Start backup mode**. The computer finds it and
-connects; after the backup the phone switches backup mode off itself (also after 30 minutes
+connects; after the backup the phone switches backup mode off itself (also after 5 minutes
 unused). The app can only read photos and videos; the connection is encrypted (TLS, certificate
-pinned while pairing). Same files and paths as over ADB, so existing backups simply continue.
+pinned while pairing). The computer **pulls** the files: it asks for every file, the phone only
+answers the paired computer and never sends anything by itself. Same files and paths as over ADB, so existing backups simply continue.
 
 ## Backup over Wi-Fi (no cable)
 

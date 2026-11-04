@@ -24,19 +24,21 @@ object AppState {
     var port by mutableStateOf(0)
     var status by mutableStateOf("")
     var pairedChanged by mutableStateOf(0)
+    var idleLeft by mutableStateOf("")       // "4:12" until backup mode switches off unused
 }
 
 /**
  * "Backup mode": runs the read-only server while the computer copies, keeps Wi-Fi and CPU awake,
  * announces the phone anonymously (mDNS _phonebkp._tcp + Bluetooth LE, see Announce) and runs the
  * USB-debugging guard (see UsbDebug). Stops by itself when the computer
- * says the backup is done, or after 30 minutes without any request.
+ * says the backup is done, or after 5 minutes without any request from the computer (user
+ * request 2026-11-04; during a backup the computer's "still here" every 30 s counts as use).
  */
 class BackupService : Service() {
     companion object {
         const val SERVICE_TYPE = "_phonebkp._tcp"
         private const val CHANNEL = "backup"
-        private const val IDLE_MS = 30 * 60_000L
+        const val IDLE_MS = 5 * 60_000L
         @Volatile var server: Server? = null
             private set
 
@@ -59,14 +61,18 @@ class BackupService : Service() {
                 stopSelf()
                 return
             }
-            main.postDelayed(this, 60_000)
+            main.postDelayed(this, 5_000)
         }
     }
     // every second: debugging guard (UsbDebug) + anonymous announcement (new token every 10 min)
     private val tick = object : Runnable {
         override fun run() {
             UsbDebug.Guard.tick(this@BackupService)?.let { AppState.status = it; notify(it) }
-            server?.let { Announce.refresh(this@BackupService, it.port) }
+            server?.let {
+                Announce.refresh(this@BackupService, it.port)
+                val left = IDLE_MS - (System.currentTimeMillis() - it.lastActivity)
+                AppState.idleLeft = if (left > 0) "%d:%02d".format(left / 60_000, left / 1000 % 60) else ""
+            }
             main.postDelayed(this, 1000)
         }
     }
@@ -102,7 +108,7 @@ class BackupService : Service() {
         AppState.port = srv.port
         AppState.status = "Waiting for the computer …"
         Announce.refresh(this, srv.port)
-        main.postDelayed(idleCheck, 60_000)
+        main.postDelayed(idleCheck, 5_000)
         main.postDelayed(tick, 1000)
     }
 

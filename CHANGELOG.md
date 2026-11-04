@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Features
+- Phone app 0.3.2: backup mode switches off after **5 minutes** without use (was 30), with a
+  countdown on the phone; the phone shows "<computer> is copying …" (the computer pulls every file).
 - **Always the fastest connection, chosen automatically** (no manual choice): overview with the
   speeds and the connection in use, log line "fastest / not the fastest + what to do", automatic
   switch from Wi-Fi / MTP to the cable when USB debugging appears, button **Find the fastest

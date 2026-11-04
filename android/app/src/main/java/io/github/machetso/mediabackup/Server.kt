@@ -199,7 +199,8 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                 if (item == null) {
                     Response.json(out, 404, """{"error":"not found"}""", keep)
                 } else {
-                    onEvent("Sending ${item.rel.substringAfterLast('/')}")
+                    // the computer asks for every file (pull) - the phone only answers
+                    onEvent("${pc.name} is copying ${item.rel.substringAfterLast('/')}")
                     media.open(item).use { Response.stream(out, it, item.size, keep) { lastActivity = System.currentTimeMillis() } }
                 }
             }

@@ -217,8 +217,10 @@ class MainActivity : ComponentActivity() {
                     if (running) {
                         Text("Phone address: ${Announce.wifiAddress(this@MainActivity)?.hostAddress ?: "no network"}  ·  port ${AppState.port}",
                             style = MaterialTheme.typography.bodySmall)
-                        Text("Start the backup on the computer. Backup mode switches off by itself when " +
-                            "the backup is done (or after 30 minutes without use).",
+                        Text("Start the backup on the computer – it asks the phone for each file and copies it; " +
+                            "the phone sends nothing by itself. Backup mode switches off by itself when the " +
+                            "backup is done, or after 5 minutes without use" +
+                            (if (AppState.idleLeft.isNotEmpty()) " (in ${AppState.idleLeft})." else "."),
                             style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = { BackupService.stop(this@MainActivity) }) { Text("Switch off") }
                     } else {
