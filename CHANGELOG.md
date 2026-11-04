@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Features
+- **Always the fastest connection, chosen automatically** (no manual choice): overview with the
+  speeds and the connection in use, log line "fastest / not the fastest + what to do", automatic
+  switch from Wi-Fi / MTP to the cable when USB debugging appears, button **Find the fastest
+  connection** (cable, Wi-Fi, Bluetooth). Destination list scrolls sideways for long names.
 - **Never back up the wrong phone** (`phoneid.py`): each backup folder remembers its phone (serial
   number, phone-app key id, model; older backups from their reports); checked when Start is
   clicked and again right before the first file - a different phone is refused. The name field is

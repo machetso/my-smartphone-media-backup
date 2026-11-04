@@ -239,3 +239,65 @@ def detect_usb_phone():
     except Exception:  # noqa: BLE001 - only a hint for the guide
         found = []
     return found[0] if found else ""
+
+
+# --------------------------------------------------------------------------- fastest connection
+# The program always uses the fastest connection it can find (user request 2026-11-04); the user
+# no longer chooses one. Order: USB cable with USB debugging > Wi-Fi (phone app / Wireless
+# debugging). File transfer (MTP) only on request ("Connect phone"): slower and no phone check.
+
+def source_key(src):
+    """Row of CONNECTIONS for a connected source (for the overview and the status line)."""
+    kind = type(src).__name__
+    if kind == "AdbSource":
+        if getattr(src, "wireless", False):
+            return "wifi_adb"
+        return "adb_app" if getattr(src, "link", None) is not None else "adb_manual"
+    if kind == "CompanionSource":
+        return "app_wifi"
+    return "mtp"
+
+
+def describe_probe(p):
+    """p: dict from the GUI's probe (usb_phone, usb_mbit, adb_usb, adb_unauthorized, adb_wifi,
+    app_wifi, ble). Returns (best key or None, [(title, available, text)], advice)."""
+    usb3 = (p.get("usb_mbit") or 0) >= 5000
+    cable_speed = "about 25–50 MB/s" if usb3 or not p.get("usb_mbit") else "about 20–30 MB/s (USB 2)"
+    rows = []
+    if p.get("adb_usb"):
+        rows.append(("USB cable + USB debugging", True, f"{p['adb_usb']} – {cable_speed}"))
+    elif p.get("adb_unauthorized"):
+        rows.append(("USB cable + USB debugging", False, "phone found – unlock it and tap “Allow” "
+                     "in “Allow USB debugging?”"))
+    elif p.get("usb_phone"):
+        rows.append(("USB cable + USB debugging", False,
+                     f"{p['usb_phone']} is on the cable, USB debugging is off – tap “Allow backup "
+                     "over cable” in the phone app (or switch on USB debugging)"))
+    else:
+        rows.append(("USB cable + USB debugging", False, "no phone on the cable"))
+    rows.append(("Wi-Fi: phone app", bool(p.get("app_wifi")),
+                 f"{p['app_wifi']} – about 3–30 MB/s" if p.get("app_wifi") else
+                 "no phone app in backup mode found in this Wi-Fi"))
+    rows.append(("Wi-Fi: Wireless debugging", bool(p.get("adb_wifi")),
+                 f"{p['adb_wifi']} – about 3–30 MB/s" if p.get("adb_wifi") else
+                 "no paired phone with Wireless debugging found"))
+    if p.get("ble") and not p.get("app_wifi"):
+        rows.append(("Bluetooth (only to find the phone)", False,
+                     f"{p['ble']} is nearby but not reachable over Wi-Fi – connect it to the same "
+                     "Wi-Fi or use the cable"))
+    best = ("adb_app" if p.get("adb_usb") else "app_wifi" if p.get("app_wifi")
+            else "wifi_adb" if p.get("adb_wifi") else None)
+    if best == "adb_app":
+        advice = ("Fastest possible connection: USB cable with USB debugging."
+                  + ("" if usb3 or not p.get("usb_mbit") else
+                     " The cable runs at USB 2 speed only – a USB 3 cable and port are about 2× faster."))
+    elif best:
+        advice = ("Wi-Fi works, but the cable is about 2–5× faster: plug the phone in and tap "
+                  "“Allow backup over cable” in the phone app.")
+        if p.get("usb_phone"):
+            advice = (f"The {p['usb_phone']} is already on the cable – tap “Allow backup over cable” "
+                      "in the phone app (or switch on USB debugging) for the fastest connection.")
+    else:
+        advice = ("No phone found. Fastest: plug the phone in with a USB cable and tap “Allow backup "
+                  "over cable” in the phone app (first time: switch on USB debugging by hand).")
+    return best, rows, advice

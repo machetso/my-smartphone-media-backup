@@ -30,15 +30,18 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
 
 **Backup settings** (subpage):
 
-* **Phone connection** – the ways to connect, with the speed to expect:
+* **Phone connection** – the program **always uses the fastest connection it finds**; you do not
+  choose one. The overview shows the speed of each way to connect, the one in use is marked, and
+  the log says whether it is the fastest and what would be faster. If the phone turns up with USB
+  debugging on the cable while it is connected over Wi-Fi, the program switches to the cable by
+  itself. **Find the fastest connection** checks the cable, the Wi-Fi and Bluetooth and shows
+  what is available.
 
   | Connection | Speed |
   |---|---|
-  | USB cable + USB debugging, switched on and off by the phone app (**recommended**) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
-  | USB cable + USB debugging, switched on by hand | same |
-  | USB cable, normal file transfer (MTP) | 10–20 MB/s |
-  | Wi-Fi: Wireless debugging | 10–40 MB/s |
-  | Wi-Fi: phone app only (no debugging) | 10–30 MB/s |
+  | USB cable + USB debugging (switched on by the phone app, or by hand) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
+  | USB cable, normal file transfer (MTP – only on request) | 10–20 MB/s |
+  | Wi-Fi: phone app or Wireless debugging | 10–40 MB/s, depends on the Wi-Fi |
   | Wi-Fi directly to this computer (no router) | 10–30 MB/s |
 
   *Switch on USB debugging (first time)…* is a step-by-step guide: it reads the model of the
@@ -87,7 +90,8 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
   folder land in the same folders in the backup, e.g. `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
   the camera folder is always sorted into year/month folders. Files already backed up stay
   where they are; identical files are still stored only once.
-* **Backup destinations** – the list of destination drives.
+* **Backup destinations** – the list of destination drives; long folder names can be scrolled
+  sideways (full name as a tooltip).
 
 **Never the wrong phone.** Every backup folder remembers its phone in `.phonebackup/phone.json`
 (model, the phone's serial number, the phone app's key id; for older backups the program reads

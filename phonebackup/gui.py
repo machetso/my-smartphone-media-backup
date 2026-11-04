@@ -38,7 +38,7 @@ from .sources import AdbSource, adb_devices, connect_source, find_adb
 from . import adbsetup, lastbackup, phoneid, wireless
 from .companion import (AppGuard, CompanionSource, apk_path, ble_scan, find_phone,
                         link_over_cable, pair_over_cable, phones as paired_phones, _port_open)
-from .gui_setup import ConnectionChooser, UsbDebugGuide
+from .gui_setup import ConnectionOverview, UsbDebugGuide
 
 PHONE_FOLDER_ROOTS = ["DCIM", "Pictures", "Movies", "Download",
                       "Android/media/com.whatsapp/WhatsApp/Media"]
@@ -140,10 +140,15 @@ class LocationList(QWidget):
         self.tree.setHeaderLabels(["Folder", "Status", "Free space"])
         self.tree.setRootIsDecorated(False)
         self.tree.setMinimumHeight(110)
+        # long folder names: the column is as wide as the name and the list scrolls sideways;
+        # status and free space only as wide as needed (user request 2026-11-04)
         h = self.tree.header()
-        h.setSectionResizeMode(0, QHeaderView.Stretch)
-        h.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        h.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        h.setStretchLastSection(False)
+        for col in (0, 1, 2):
+            h.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tree.setTextElideMode(Qt.ElideNone)
+        self.tree.setMinimumWidth(150)       # the page must not grow with long names
         if multi:
             self.tree.itemChanged.connect(self._check_changed)
         else:
@@ -193,6 +198,7 @@ class LocationList(QWidget):
         for p in self.paths():
             it = QTreeWidgetItem([p, "", ""])
             it.setData(0, Qt.UserRole, p)
+            it.setToolTip(0, p)
             if self.multi:
                 it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
                 it.setCheckState(0, Qt.Checked if p in sel else Qt.Unchecked)
@@ -719,9 +725,9 @@ class MainWindow(QMainWindow):
         self.phone_status.setWordWrap(True)
         self.phone_status.setTextFormat(Qt.RichText)
         phone_box.addWidget(self.phone_status)
-        self.conn_chooser = ConnectionChooser(self.cfg.get("connection_mode") or adbsetup.DEFAULT_CONNECTION)
-        self.conn_chooser.changed.connect(self._connection_changed)
-        phone_box.addWidget(self.conn_chooser)
+        self.conn_overview = ConnectionOverview()
+        self.conn_overview.setToolTip("The program always uses the fastest connection it finds.")
+        phone_box.addWidget(self.conn_overview)
         self.debug_off_check = QCheckBox("Switch USB debugging / Wireless debugging off on the phone "
                                          "after the backup")
         self.debug_off_check.setChecked(bool(self.cfg.get("debugging_off_after", True)))
@@ -746,19 +752,32 @@ class MainWindow(QMainWindow):
         self.app_btn.setToolTip("Phone app 'Fast Media Backup': backups over Wi-Fi without USB debugging. "
                                 "It may only read photos and videos.")
         self.app_btn.clicked.connect(self._setup_phone_app)
-        btns = QHBoxLayout()
-        for b in (self.connect_btn, self.guide_btn, self.wifi_pair_btn, self.hotspot_btn, self.app_btn):
-            btns.addWidget(b)
-        btns.addStretch()
-        phone_box.addLayout(btns)
+        self.fastest_btn = QPushButton("Find the fastest connection")
+        self.fastest_btn.setStyleSheet("QPushButton{font-weight:600}")
+        self.fastest_btn.setToolTip("Checks the USB cable, the Wi-Fi and Bluetooth and uses the fastest "
+                                    "connection – and says what would make it faster.")
+        self.fastest_btn.clicked.connect(self._find_fastest)
+        self.connect_btn.setText("Connect via file transfer (MTP)")
+        self.connect_btn.setToolTip("Only if nothing else works: the phone's normal file transfer "
+                                    "(slower, no check on the phone).")
+        self.app_btn.setText("Phone app over Wi-Fi…")
+        self.connect_btn.setText("File transfer (MTP)")
+        for row in ((self.fastest_btn, self.guide_btn),
+                    (self.app_btn, self.wifi_pair_btn, self.hotspot_btn),
+                    (self.connect_btn,)):
+            btns = QHBoxLayout()
+            for b in row:
+                btns.addWidget(b)
+            btns.addStretch()
+            phone_box.addLayout(btns)
         lay.addWidget(_group("Phone connection", phone_box))
-        self._connection_changed(self.conn_chooser.key(), save=False)
 
         fl = QHBoxLayout()
         self.folder_list = QListWidget()
         self.folder_list.setMaximumHeight(110)
         # several at once: Ctrl/Shift-click, "Select all" (user request 2026-11-04)
         self.folder_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.folder_list.setMinimumWidth(150)
         self._fill_folder_list()
         fbtn = QVBoxLayout()
         cam = QPushButton("Camera")
@@ -1423,6 +1442,8 @@ class MainWindow(QMainWindow):
         return w
 
     def _update_home(self):
+        if hasattr(self, "conn_overview"):
+            self.conn_overview.set_active(adbsetup.source_key(self.source) if self.source else None)
         if not hasattr(self, "phone_rows"):
             return
         entries = lastbackup.phones(self.cfg)
@@ -1442,7 +1463,6 @@ class MainWindow(QMainWindow):
                 lab.setStyleSheet(f"color:{GRAY}")
                 self.phone_rows.addWidget(lab)
         connected = self._connected_phone()
-        mode = self.cfg.get("connection_mode") or adbsetup.DEFAULT_CONNECTION
         for key, e in zip(keys, entries):
             w = self._phone_widgets[key]
             w.title.setText(lastbackup.title(e))
@@ -1458,15 +1478,8 @@ class MainWindow(QMainWindow):
                     attached = ()
             ok, hint = lastbackup.check(e, connected, attached_labels=attached)
             if not connected:
-                hint += {
-                    "adb_app": " On the phone: open “Fast Media Backup”, tap “Allow backup over "
-                               "cable”, then plug in the USB cable.",
-                    "adb_manual": " Switch on USB debugging on the phone and plug in the USB cable.",
-                    "mtp": " Plug in the USB cable and choose “File transfer” on the phone.",
-                    "wifi_adb": " Switch on Wireless debugging on the phone (same Wi-Fi).",
-                    "app_wifi": " Open “Fast Media Backup” on the phone and tap “Start backup mode”.",
-                    "hotspot": " Start Direct Wi-Fi in “Backup settings…” and connect the phone.",
-                }.get(mode, "")
+                hint += (" Fastest: open “Fast Media Backup” on the phone, tap “Allow backup over "
+                         "cable” and plug in the USB cable (Wi-Fi: “Start backup mode” in the app).")
             w.button.setEnabled(ok and not self.busy)
             w.hint.setText(f"<span style='color:{GREEN if ok else GRAY}'>{html.escape(hint)}</span>")
 
@@ -1509,34 +1522,20 @@ class MainWindow(QMainWindow):
         self._start_backup()
 
     # ------------------------------------------------------------------ connection settings
-    def _connection_changed(self, key, save=True):
-        if save:
-            self.cfg["connection_mode"] = key
-            config.save(self.cfg)
-        usb_debug = key in adbsetup.USB_DEBUGGING_MODES
-        self.guide_btn.setVisible(usb_debug)
-        self.wifi_pair_btn.setVisible(key in ("wifi_adb", "hotspot"))
-        self.hotspot_btn.setVisible(key == "hotspot")
-        self.app_btn.setVisible(key in ("app_wifi", "hotspot"))
-        self.debug_off_check.setVisible(key in adbsetup.USB_DEBUGGING_MODES + ("wifi_adb", "hotspot"))
-        self._update_home()
-
     def _debug_off_changed(self, on):
         self.cfg["debugging_off_after"] = bool(on)
         config.save(self.cfg)
 
     def _show_usb_guide(self):
         model = self._connected_phone() or self.phone_edit.text().strip()
-        UsbDebugGuide(self, model, with_app=self.cfg.get("connection_mode", adbsetup.DEFAULT_CONNECTION)
-                      == "adb_app").exec()
+        UsbDebugGuide(self, model, with_app=True).exec()
 
     def _cable_setup(self, src):
         """Phone on USB debugging: verify it through the phone app (key check over the cable).
         Mode 'phone app switches it': set the app up first if needed - install, allow switching
         USB debugging, open, pair over the cable (confirmed on the phone). Once per phone and session."""
         src.link = None
-        mode = self.cfg.get("connection_mode", adbsetup.DEFAULT_CONNECTION)
-        setup = mode == "adb_app" and src.serial not in self._companion_asked
+        setup = src.serial not in self._companion_asked
         if not paired_phones(self.cfg) and not setup:
             return
         self._companion_asked.add(src.serial)
@@ -1658,8 +1657,7 @@ class MainWindow(QMainWindow):
         entry, addr = found
         if self.busy or self.connecting or self.source is not None:
             return
-        mode = self.cfg.get("connection_mode", adbsetup.DEFAULT_CONNECTION)
-        on_cable = adbsetup.detect_usb_phone() if mode in ("adb_app", "adb_manual", "mtp") else ""
+        on_cable = adbsetup.detect_usb_phone()
         if on_cable:                  # the phone on the cable comes first - never take another one
             self._set_phone_status(
                 f"{on_cable} is on the USB cable, but USB debugging is off. Tap “Allow backup over "
@@ -1703,6 +1701,18 @@ class MainWindow(QMainWindow):
         if self.busy or self.connecting:
             return
         src = self.source
+        usb_ready = [s for s, st in (devs or []) if st == "device" and not wireless.is_wireless(s)]
+        slower = src is not None and (not isinstance(src, AdbSource) or src.wireless)
+        if slower and usb_ready and time.monotonic() >= self._adb_retry_at:
+            # always the fastest: a phone with USB debugging on the cable beats Wi-Fi / MTP
+            ui.info(f"USB debugging on the cable found – switching from {src.kind} to the cable "
+                    "(faster).")
+            try:
+                if isinstance(src, CompanionSource):
+                    src.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self.source = src = None
         if isinstance(src, AdbSource):
             if devs is None or src.serial not in [s for s, st in devs if st == "device"]:
                 self.source = None
@@ -1804,7 +1814,78 @@ class MainWindow(QMainWindow):
                                 f"The backup now uses the {src.kind} connection instead.\n"
                                 "This is slower, and the phone itself cannot calculate hashes; "
                                 "the copies are compared with the received data instead.")
+        self._say_connection(src)
         self._update_preview()
+
+    def _say_connection(self, src):
+        """Log which connection is used and - if it is not the fastest - how to get a faster one."""
+        key = adbsetup.source_key(src)
+        conn = adbsetup.CONNECTIONS_BY_KEY[key]
+        if key in ("adb_app", "adb_manual") and not src.wireless:
+            mbit = phoneid.usb_speed_mbit()
+            if mbit is not None and mbit < 5000:
+                ui.warn(f"Connection: {conn.short} – only USB 2 speed. A USB 3 cable and port are "
+                        "about 2× faster.")
+            else:
+                ui.ok(f"Connection: {conn.short} – the fastest connection.")
+            return
+        on_cable = adbsetup.detect_usb_phone()
+        ui.warn(f"Connection: {conn.short} ({conn.speed_short}) – not the fastest. "
+                + (f"The {on_cable} is on the USB cable: tap “Allow backup over cable” in the phone "
+                   "app – the program then switches to the cable by itself." if on_cable else
+                   "Faster: plug the phone in with a USB cable and tap “Allow backup over cable” in "
+                   "the phone app – the program switches to the cable by itself."))
+
+    def _find_fastest(self):
+        """Check every way to reach a phone, use the fastest, say what would be faster."""
+        cfg = self.cfg
+
+        def probe():
+            p = {"usb_phone": adbsetup.detect_usb_phone(), "usb_mbit": phoneid.usb_speed_mbit()}
+            adb = find_adb(cfg)
+            if adb:
+                try:
+                    devs = adb_devices(adb)
+                except Exception:  # noqa: BLE001
+                    devs = []
+                usb = [s for s, st in devs if st == "device" and not wireless.is_wireless(s)]
+                wifi = [s for s, st in devs if st == "device" and wireless.is_wireless(s)]
+                p["adb_unauthorized"] = any(st == "unauthorized" for _s, st in devs)
+                for key, serials in (("adb_usb", usb), ("adb_wifi", wifi)):
+                    if serials:
+                        try:
+                            p[key] = AdbSource(adb, serials[0]).device_name
+                        except Exception:  # noqa: BLE001
+                            p[key] = serials[0]
+                if not wifi:
+                    addr = wireless.auto_connect(adb, cfg.get("wifi_last_address", ""))
+                    if addr:
+                        p["adb_wifi"] = addr
+            if paired_phones(cfg):
+                entry, addr = find_phone(cfg)
+                if entry:
+                    p["app_wifi"] = entry.get("name") or addr
+                    p["_app"] = (entry, addr)
+                else:
+                    e, _a = ble_scan(cfg, 4)
+                    if e:
+                        p["ble"] = e.get("name", "your phone")
+            return p
+
+        def show(p):
+            best, rows, advice = adbsetup.describe_probe(p)
+            lines = "".join(
+                f"<tr><td>{'✅' if ok else '–'}</td><td><b>{html.escape(t)}</b></td>"
+                f"<td>{html.escape(txt)}</td></tr>" for t, ok, txt in rows)
+            QMessageBox.information(self, "Fastest connection",
+                                    f"<table cellspacing=6>{lines}</table><p>{html.escape(advice)}</p>")
+            current = adbsetup.source_key(self.source) if self.source else None
+            if best == "adb_app" and current not in ("adb_app", "adb_manual"):
+                self._adb_retry_at = 0           # the poller switches to the cable
+            elif best == "app_wifi" and self.source is None and "_app" in p:
+                self.bridge.companion_found.emit(p["_app"])
+
+        self.run_job(probe, show)
 
     # ------------------------------------------------------------------ folders
     def _fill_folder_list(self):

@@ -102,3 +102,37 @@ class ControlCommandTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FastestConnectionTest(unittest.TestCase):
+    def test_cable_wins(self):
+        best, rows, advice = adbsetup.describe_probe(
+            {"usb_phone": "Samsung phone", "usb_mbit": 5000, "adb_usb": "SM-G780G",
+             "app_wifi": "Pixel 10 Pro"})
+        self.assertEqual(best, "adb_app")
+        self.assertIn("Fastest possible", advice)
+
+    def test_wifi_with_phone_on_cable(self):
+        best, rows, advice = adbsetup.describe_probe(
+            {"usb_phone": "Samsung phone", "usb_mbit": 5000, "app_wifi": "SM-G780G"})
+        self.assertEqual(best, "app_wifi")
+        self.assertIn("already on the cable", advice)
+        self.assertFalse(rows[0][1])
+
+    def test_nothing_and_usb2(self):
+        self.assertIsNone(adbsetup.describe_probe({})[0])
+        _b, _r, advice = adbsetup.describe_probe({"adb_usb": "Pixel", "usb_mbit": 480})
+        self.assertIn("USB 2", advice)
+
+    def test_source_key(self):
+        class AdbSource:
+            wireless, link = False, None
+        class CompanionSource:
+            pass
+        self.assertEqual(adbsetup.source_key(AdbSource()), "adb_manual")
+        a = AdbSource()
+        a.link = object()
+        self.assertEqual(adbsetup.source_key(a), "adb_app")
+        a.wireless = True
+        self.assertEqual(adbsetup.source_key(a), "wifi_adb")
+        self.assertEqual(adbsetup.source_key(CompanionSource()), "app_wifi")
