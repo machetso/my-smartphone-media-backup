@@ -11,7 +11,7 @@ from pathlib import Path
 from . import ui
 from .copier import Cancelled, sha256_file, stream_copy
 from .index import INTERNAL_DIR, BackupIndex
-from .layout import relative_dir, safe_name, unique_path
+from .layout import keep_structure_placement, relative_dir, safe_name, unique_path
 from .media import CATEGORY_LABEL, category_for, detect_date
 from .report import unique_basename, write_reports
 from .sources import PhoneHasher
@@ -77,7 +77,7 @@ def _remove(path):
         pass
 
 
-def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
+def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placement=None):
     res = FileResult(sf=sf, category=cat)
     stream_sha, wres, last_err = None, None, ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -149,7 +149,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
 
     taken, how = detect_date(good[0][1].path, sf.name, sf.mtime)
     res.taken, res.date_source = taken, how
-    placement = getattr(source, "placement", None)
+    placement = placement or getattr(source, "placement", None)
     reldir = placement(sf, taken, cat) if placement else relative_dir(taken, cat)
 
     for d, w in good:
@@ -192,13 +192,15 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None):
 
 
 def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interactive=True, cancel=None,
-                   parent_name=None, mode="backup", source_label=""):
+                   parent_name=None, mode="backup", source_label="", keep_structure=False):
     """Run one backup (or, with mode="import", an import of a folder into an existing backup).
 
     Returns (status, report paths, file results, verdict text).
     """
     started = datetime.now()
     t0 = time.monotonic()
+    # keep_structure: folders other than the camera folder keep their path (user request 2026-11-04)
+    placement = keep_structure_placement(folders) if keep_structure else None
     where = "in the source folder" if mode == "import" else "on the phone"
     parent_name = parent_name or backup_parent_name(phone_name, owner)
     dests = []
@@ -257,6 +259,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
         if todo and source.supports_phone_hash:
             hasher = PhoneHasher(source, [sf.rel for sf, _, _ in todo])
             hasher.start()
+        if todo and hasattr(source, "prefetch"):     # Wi-Fi phone app: fetch ahead
+            source.prefetch([sf for sf, _, _ in todo])
         for i, (sf, cat, need) in enumerate(todo, 1):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
@@ -267,7 +271,7 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
                     r.per_dest[d.label] = (f"ERROR: destination unavailable ({d.problem})", "")
                 results.append(r)
                 continue
-            r = _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel)
+            r = _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel, placement)
             for d in need:
                 if d not in targets:
                     r.per_dest[d.label] = (f"ERROR: destination unavailable ({d.problem})", "")

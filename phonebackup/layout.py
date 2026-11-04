@@ -4,6 +4,7 @@
                            /01.January-videos
                            /raw/01.January-raw
                            /other/pictures|movies|other-files/<original folder>/   (old phone imports)
+                    /Pictures/Screenshots/…      ("keep folder structure" for non-camera folders)
 """
 
 import os
@@ -39,6 +40,39 @@ def other_dir(dt, category, original_folder):
         if part not in ("", ".", ".."):
             d = d / safe_name(part)
     return d
+
+
+def is_camera_folder(folder):
+    """The phone's camera folder: DCIM/Camera (and its sub-folders) or DCIM/100ANDRO-style folders.
+    Screenshots in DCIM/Screenshots (Samsung) are not camera pictures."""
+    parts = [p for p in str(folder).replace("\\", "/").split("/") if p]
+    if len(parts) < 2 or parts[0].upper() != "DCIM":
+        return False
+    sub = parts[1].lower()
+    return sub == "camera" or bool(re.fullmatch(r"\d{3}[a-z_]*", sub))
+
+
+def structure_dir(rel):
+    """Keep the phone's folders: 'Pictures/Screenshots/x.png' → Pictures/Screenshots."""
+    d = Path()
+    for part in str(rel).replace("\\", "/").split("/")[:-1]:
+        if part not in ("", ".", ".."):
+            d = d / safe_name(part)
+    return d
+
+
+def keep_structure_placement(folders):
+    """placement(sf, taken, cat) for perform_backup: files in the chosen non-camera folders keep
+    their folder path, everything else goes into the year/month folders."""
+    keep = [f.strip("/") for f in folders if f.strip("/") and not is_camera_folder(f)]
+
+    def placement(sf, taken, cat):
+        rel = sf.rel.replace("\\", "/")
+        if any(rel == k or rel.startswith(k + "/") for k in keep):
+            return structure_dir(rel)
+        return relative_dir(taken, cat)
+
+    return placement
 
 
 _BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f]')

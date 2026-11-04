@@ -1,1 +1,3 @@
 PySide6>=6.5
+segno>=1.5
+bleak>=0.22

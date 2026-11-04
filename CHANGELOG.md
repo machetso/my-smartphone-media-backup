@@ -1,5 +1,65 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+- **Never back up the wrong phone** (`phoneid.py`): each backup folder remembers its phone (serial
+  number, phone-app key id, model; older backups from their reports); checked when Start is
+  clicked and again right before the first file - a different phone is refused. The name field is
+  never replaced by another phone; no Wi-Fi phone while a phone is on the cable. The start
+  confirmation shows the connection and how to make it faster if it is not the fastest.
+- New name: **Fast Smartphone Media Backup** (phone app: *Fast Media Backup*).
+- Simple start screen: **Your phones**, one entry per backup with its own **Update backup**
+  (same phone, folders and drives, only new files; enabled when that phone and a drive are
+  connected; older backups found on the drives; select all / remove from list), **New backup…**,
+  **Backup settings…**, **Import, export, restore…**. Folder lists per backup.
+- Backup settings as a subpage: phone connection with a speed overview of all connection types
+  (USB debugging via the phone app preselected), **Camera** button (`DCIM/Camera`) next to
+  *Choose folders…* and *Remove*.
+- USB debugging only for the backup: the phone app (installed and granted
+  `WRITE_SECURE_SETTINGS` over the cable once) switches USB debugging on (*Allow backup over
+  cable*); the computer switches USB / Wireless debugging off after every backup. The only
+  non-read-only commands are a fixed list in `phoneguard.CONTROL`.
+- Debugging switch-off rules, enforced by the phone app (0.3.0): 5 min without a backup start →
+  off; "still here" every 30 s, nothing for 2 min → off; one connection per backup (the other
+  debugging is switched off at the start); backup mode ends → off; the app never switches
+  Wireless debugging on.
+- Secure recognition by the phone's Keystore key: over the cable via `adb forward` (status
+  "verified"), pairing over the cable confirmed on the phone; anonymous Wi-Fi announcement
+  (random name, HMAC token changing every 10 min, no model / id); Bluetooth LE only to find the
+  phone (same token + encrypted address), never for files. New dependency: `bleak`.
+- Backup settings in two columns (everything visible without scrolling); *Select all* /
+  *Select none* in the folder chooser; option **keep the phone's folder structure** for folders
+  other than the camera folder (`layout.keep_structure_placement`).
+- Beginner's guide *Switch on USB debugging (first time)…*: detects the phone model on the USB
+  cable without debugging, steps for the common brands, web search for any other phone.
+- Backup over Wi-Fi with Android's Wireless debugging (ADB over Wi-Fi, no phone app): *Pair over
+  Wi-Fi…* (QR code or 6-digit code), paired phones are then found and connected automatically
+  (mDNS + last address); USB is preferred when both are available. Same SHA-256 check on the
+  phone as over USB; report shows "ADB over Wi-Fi".
+- *Direct Wi-Fi…*: the computer opens its own hotspot (Linux via NetworkManager, 5 GHz first;
+  Windows opens the Mobile hotspot settings) with a QR code for the phone - backups without a
+  router. The app offers to stop it on exit.
+- New dependency: `segno` (QR codes, pure Python).
+- Read-only guard (`phoneguard.py`): every command the app sends to the phone must match one of
+  a few fixed read-only templates (getprop, test -d, find/stat, sha256sum, cat) with all paths
+  inside /sdcard; anything else is refused before it reaches adb.
+
+- Phone app "Media Backup" (android/, Kotlin): backups over Wi-Fi WITHOUT USB debugging. The app
+  may only read photos and videos (MediaStore); TLS with the phone's Keystore certificate pinned
+  by the computer + a secret per paired computer; SHA-256 on the phone; same paths as ADB, so
+  existing backups continue. "Set up phone app…" shows a QR code → page served by the computer
+  (download APK, "Connect app") → both show a 6-digit code → confirm. Backup mode on the phone
+  switches off after the backup (or after 30 min unused). Android 17: asks for local-network access.
+  Built with tools/build_companion.sh (1.6 MB, shipped in assets/companion/).
+
+### Fixes
+- Wi-Fi backups through the phone app much faster with many small files (measured 4.1 → 11.4 MB/s,
+  the limit of the Wi-Fi link): the computer fetches up to 3 files ahead (max. 128 MB in memory,
+  checked against the phone's SHA-256 as before); the phone app (0.3.1) no longer rebuilds its
+  photo list every 20 s during a backup. An older phone app is updated automatically over the cable.
+- Wi-Fi pairing hung on Linux: adb's own mDNS found nothing, now Avahi is asked as well.
+
 ## [0.9.3] - 2026-11-02
 
 ### Features

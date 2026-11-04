@@ -34,10 +34,10 @@ jobs:
         include:
           - os: ubuntu-22.04          # older glibc = runs on more Linux distributions
             platform: linux-x86_64
-            binary: my-smartphone-media-backup
+            binary: fast-smartphone-media-backup
           - os: windows-latest
             platform: windows-x64
-            binary: My-Smartphone-Media-Backup
+            binary: Fast-Smartphone-Media-Backup
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -64,21 +64,21 @@ jobs:
 
       - name: Build program
         run: |
-          EXTRA=""
+          EXTRA="--hidden-import segno --collect-submodules bleak"
           SEP=":"
           if [ "$RUNNER_OS" = "Windows" ]; then
             SEP=";"
-            EXTRA="--hidden-import win32com.client --hidden-import pythoncom"
+            EXTRA="$EXTRA --hidden-import win32com.client --hidden-import pythoncom"
           fi
           python -m PyInstaller --noconfirm --clean --onefile --windowed \
             --name "${{ matrix.binary }}" --exclude-module tkinter $EXTRA \
-            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" \
+            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" --add-data "assets/companion/MediaBackup.apk${SEP}assets/companion" \
             smartphone_media_backup.py
 
       - name: Package
         run: |
           VERSION=$(python -c "import phonebackup; print(phonebackup.__version__)")
-          NAME="my-smartphone-media-backup-v${VERSION}-${{ matrix.platform }}"
+          NAME="fast-smartphone-media-backup-v${VERSION}-${{ matrix.platform }}"
           mkdir -p "pkg/$NAME"
           cp dist/* README.md LICENSE "pkg/$NAME/"
           cd pkg
@@ -125,5 +125,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" pkg/* \
             --draft \
-            --title "My Smartphone Media Backup $GITHUB_REF_NAME" \
+            --title "Fast Smartphone Media Backup $GITHUB_REF_NAME" \
             --notes-file notes.md

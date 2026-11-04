@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from . import ui
+from . import phoneguard, ui
 from .copier import CHUNK, file_chunks, sha256_file
 
 PHONE_ROOT = "/sdcard"
@@ -89,7 +89,6 @@ def adb_devices(adb):
 
 
 class AdbSource:
-    kind = "ADB"
     supports_phone_hash = True
 
     def __init__(self, adb, serial):
@@ -99,17 +98,93 @@ class AdbSource:
         self.manufacturer = self.shell("getprop ro.product.manufacturer").strip()
         self.device_name = model or serial
         self.android = self.shell("getprop ro.build.version.release").strip()
+        # the phone's own serial number (for Wi-Fi debugging the adb "serial" is only ip:port)
+        self.hw_serial = self.shell("getprop ro.serialno").strip() or (
+            "" if self.wireless else serial)
         self.fallback_reason = None
         self._has_sha = None
         self._proc = None
 
     @property
+    def wireless(self):
+        from .wireless import is_wireless
+        return is_wireless(self.serial)
+
+    @property
+    def kind(self):
+        return "ADB over Wi-Fi" if self.wireless else "ADB"
+
+    @property
     def description(self):
-        return f"ADB (USB debugging), serial {self.serial}, Android {self.android}"
+        how = "Wi-Fi (wireless debugging)" if self.wireless else "USB debugging"
+        return f"ADB ({how}), serial {self.serial}, Android {self.android}"
 
     def shell(self, cmd, timeout=120):
+        phoneguard.check(cmd)       # read-only commands only, paths inside /sdcard
         r = _run([self.adb, "-s", self.serial, "shell", cmd], timeout=timeout)
         return r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+
+    # ---- the few fixed control actions (phoneguard.CONTROL) - never built from data
+    def control(self, name, timeout=30):
+        cmd = phoneguard.check_control(name)
+        r = _run([self.adb, "-s", self.serial, "shell", cmd], timeout=timeout)
+        return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace")
+
+    def companion_state(self):
+        """'missing' / 'no-permission' (installed, cannot switch debugging yet) / 'outdated'
+        (older than the app bundled with this program) / 'ready'."""
+        _rc, out = self.control("companion_installed")
+        if f"package:{phoneguard.COMPANION_PACKAGE}" not in out.split():
+            return "missing"
+        _rc, out = self.control("companion_granted")
+        granted = re.search(r"android\.permission\.WRITE_SECURE_SETTINGS: granted=true", out)
+        if not granted:
+            return "no-permission"
+        from .companion import APP_VERSION_CODE
+        m = re.search(r"versionCode=(\d+)", out)
+        return "outdated" if m and int(m.group(1)) < APP_VERSION_CODE else "ready"
+
+    def install_companion(self, apk):
+        """Install / update the bundled phone app (only this one file) and give it the right to
+        switch USB debugging on. Returns (ok, message)."""
+        if Path(apk).name != "MediaBackup.apk" or not Path(apk).is_file():
+            raise phoneguard.ForbiddenPhoneCommand("refused: only the bundled phone app may be installed")
+        r = _run([self.adb, "-s", self.serial, "install", "-r", str(apk)], timeout=180)
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        if r.returncode != 0 or "Success" not in out:
+            return False, out.strip().splitlines()[-1] if out.strip() else "install failed"
+        rc, out = self.control("companion_grant")
+        if rc != 0:
+            return False, out.strip() or "permission could not be granted"
+        return True, "installed"
+
+    def forward(self, remote_port):
+        """adb forward tcp:<free local port> → the phone app's server. Returns the local port or None."""
+        try:
+            r = _run([self.adb, "-s", self.serial, "forward", "tcp:0", f"tcp:{int(remote_port)}"], timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        out = r.stdout.decode().strip()
+        return int(out) if r.returncode == 0 and out.isdigit() else None
+
+    def unforward(self, local_port):
+        try:
+            _run([self.adb, "-s", self.serial, "forward", "--remove", f"tcp:{int(local_port)}"], timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    def switch_off_debugging(self):
+        """After a backup: switch USB debugging (and Wireless debugging) off on the phone.
+        The connection drops right away, so errors are expected and ignored."""
+        # first the connection we are NOT using - switching off our own one cuts the line
+        # (tested on a Pixel 10 Pro: USB debugging off keeps Wireless debugging running)
+        order = (("usb_debugging_off", "wifi_debugging_off") if self.wireless
+                 else ("wifi_debugging_off", "usb_debugging_off"))
+        for name in order:
+            try:
+                self.control(name, timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
 
     def is_connected(self):
         try:
@@ -155,6 +230,31 @@ class AdbSource:
                     files.append(SourceFile(r, int(parts[0]), int(parts[1])))
         return _dedupe(files), missing
 
+    # ---- many small files: one "cat a b c" per group instead of one command per file (each
+    # command costs ~65 ms; with 220 KB WhatsApp files that was most of the time). The bytes are
+    # split by the known sizes and checked against the phone's SHA-256 like every file.
+    def prefetch(self, files):
+        from .companion import Prefetcher
+        if getattr(self, "_prefetch", None) is not None:
+            self._prefetch.stop()
+        self._prefetch = Prefetcher(self._fetch_group, files, group_files=64,
+                                    group_bytes=16 * 1024 * 1024, workers=2,
+                                    max_file=4 * 1024 * 1024)
+
+    def _fetch_group(self, group):
+        cmd = "cat " + " ".join(_q(PHONE_ROOT + "/" + sf.rel) for sf in group)
+        phoneguard.check(cmd)
+        r = subprocess.run([self.adb, "-s", self.serial, "shell", "-T", cmd], capture_output=True,
+                           timeout=300, creationflags=_NO_WINDOW)
+        data, want = r.stdout, sum(sf.size for sf in group)
+        if r.returncode != 0 or len(data) != want:
+            return {}            # a file changed or is unreadable: stream them one by one
+        out, pos = {}, 0
+        for sf in group:
+            out[sf.rel] = data[pos:pos + sf.size]
+            pos += sf.size
+        return out
+
     def has_sha256sum(self):
         if self._has_sha is None:
             self._has_sha = self.shell("command -v sha256sum >/dev/null && echo YES").strip() == "YES"
@@ -174,14 +274,25 @@ class AdbSource:
         return res
 
     def open_stream(self, sf):
+        pf = getattr(self, "_prefetch", None)
+        data = pf.take(sf) if pf is not None else None
+        if data is not None:
+            for i in range(0, len(data), CHUNK):
+                yield data[i:i + CHUNK]
+            return
+        yield from self._open_stream(sf)
+
+    def _open_stream(self, sf):
         """Yield the file content.
 
         'adb shell -T cat' (shell protocol, no terminal = binary-safe) measured 5-6x faster than
         'adb exec-out cat' on a Pixel 10 Pro over USB 3 (~50 vs ~8 MB/s). Every file is
         SHA-256-checked against the phone anyway.
         """
+        cmd = "cat " + _q(PHONE_ROOT + "/" + sf.rel)
+        phoneguard.check(cmd)
         proc = subprocess.Popen(
-            [self.adb, "-s", self.serial, "shell", "-T", "cat " + _q(PHONE_ROOT + "/" + sf.rel)],
+            [self.adb, "-s", self.serial, "shell", "-T", cmd],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
             creationflags=_NO_WINDOW)
         self._proc = proc
@@ -199,6 +310,9 @@ class AdbSource:
             self._proc = None
 
     def close(self):
+        if getattr(self, "_prefetch", None) is not None:
+            self._prefetch.stop()
+            self._prefetch = None
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
 
@@ -258,6 +372,16 @@ def connect_adb(cfg):
         return None, f"could not start adb: {e}"
     wait = max(1, int(cfg.get("adb_wait_seconds", 20)))
     ui.info(f"Looking for the phone via ADB (up to {wait} s) - connect it now if not done yet ...")
+    from .wireless import auto_connect, remember, usb_first
+    try:
+        no_phone = not any(st == "device" for _, st in adb_devices(adb))
+    except (OSError, subprocess.SubprocessError):
+        no_phone = False
+    if no_phone:
+        addr = auto_connect(adb, cfg.get("wifi_last_address", ""))
+        if addr:
+            ui.info(f"  Phone found over Wi-Fi ({addr}).")
+            remember(cfg, addr)
     deadline = time.monotonic() + wait
     told_unauth = False
     while True:
@@ -265,7 +389,7 @@ def connect_adb(cfg):
             devs = adb_devices(adb)
         except (OSError, subprocess.SubprocessError) as e:
             return None, f"adb error: {e}"
-        ready = [s for s, st in devs if st == "device"]
+        ready = usb_first([s for s, st in devs if st == "device"])
         if ready:
             serial = ready[0]
             if len(ready) > 1:
@@ -285,7 +409,8 @@ def connect_adb(cfg):
                 return None, "the phone did not allow USB debugging for this computer"
             if devs:
                 return None, f"phone state is '{devs[0][1]}' (not ready)"
-            return None, "no phone with USB debugging enabled was found"
+            return None, ("no phone with USB debugging enabled was found (and no paired phone "
+                          "with wireless debugging in this Wi-Fi)")
         time.sleep(0.5)
 
 

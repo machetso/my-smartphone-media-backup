@@ -1,4 +1,4 @@
-# My Smartphone Media Backup
+# Fast Smartphone Media Backup
 
 Verified, incremental backup of photos and videos from an Android phone to one or more
 external drives, sorted by year and month, with a report after every run.
@@ -20,14 +20,90 @@ See [CHANGELOG.md](CHANGELOG.md) for what is new.
 start-windows.pyw                 # Windows: double-click (after: py -m pip install PySide6)
 ```
 
-The window has four tabs:
+**Start screen:** **Your phones** – one entry per backup (e.g. *Sam's Pixel 10 Pro*,
+*Kim's Galaxy A55*) with the date of its last backup and its own **Update backup** button,
+enabled when exactly that phone and one of its drives are connected (same folders and drives,
+only new photos and videos). Backups made before this list existed are found on the connected
+drives. *Select all* / *Remove from list* hide phones (their backups stay on the drives). Below:
+**New backup…** (another phone, or other folders / drives), **Backup settings…** and
+**Import, export, restore…** (the tabs below).
 
-* **Backup** – owner, phone name (filled in automatically), phone folders (*Choose folders…*),
-  and the list of destination drives. Tick one or more. *Add drive…* lists the connected
+**Backup settings** (subpage):
+
+* **Phone connection** – the ways to connect, with the speed to expect:
+
+  | Connection | Speed |
+  |---|---|
+  | USB cable + USB debugging, switched on and off by the phone app (**recommended**) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
+  | USB cable + USB debugging, switched on by hand | same |
+  | USB cable, normal file transfer (MTP) | 10–20 MB/s |
+  | Wi-Fi: Wireless debugging | 10–40 MB/s |
+  | Wi-Fi: phone app only (no debugging) | 10–30 MB/s |
+  | Wi-Fi directly to this computer (no router) | 10–30 MB/s |
+
+  *Switch on USB debugging (first time)…* is a step-by-step guide: it reads the model of the
+  phone on the cable (works before USB debugging is on), has the steps for Pixel, Samsung,
+  Xiaomi / Redmi / POCO, OnePlus / OPPO / realme, Motorola, Huawei / Honor, Sony and Nothing, and
+  *Search the web for this phone* for any other. Android requires this once by hand – no program
+  can switch USB debugging on before that.
+  **Phone app switches it:** at the first USB-debugging connection the program offers to install
+  the phone app *Fast Media Backup* and give it the right to switch USB debugging (Android's
+  `WRITE_SECURE_SETTINGS`, granted over the cable – the app cannot get it by itself). From then
+  on: open the app → **Allow backup over cable** → plug in. After every backup the computer
+  switches USB debugging (or Wireless debugging) off again (*Switch … off after the backup*, on
+  by default). Only USB debugging is switched off; the Developer options stay.
+
+  **Rules for switching debugging off** (the phone app enforces them even if the computer is gone):
+  1. Wi-Fi backups normally run through the phone app with debugging off; Wireless debugging
+     only for phones without the app.
+  2. One connection per backup: over the cable → Wireless debugging is switched off at the start;
+     through the app over Wi-Fi → USB debugging is switched off at the start.
+  3. The phone app never switches Wireless debugging on.
+  4. 5 minutes after *Allow backup over cable* without a backup start → off (countdown on the phone).
+  5. During a backup the computer says "still here" every 30 s; nothing for 2 minutes → off.
+  6. Right after the backup the computer switches it off (and ends backup mode on the phone).
+
+  **Recognising the phone securely:** at pairing the phone app creates a key in the phone's
+  security chip; the computer stores its fingerprint. Model, serial number or names are never
+  trusted – every connection checks that key (TLS with the pinned certificate) before the
+  computer's secret is sent.
+  * **Cable:** while the app runs, the computer reaches it through the cable (`adb forward`) and
+    checks the key – the status then says *verified*. First time: the computer installs the app,
+    opens it and asks to pair over the cable; you tap **Pair** on the phone (no code needed, the
+    cable is the proof).
+  * **Wi-Fi:** the app announces itself anonymously: a random name and a code that changes every
+    10 minutes, which only a paired computer can recognise (HMAC of the pairing secret). Strangers
+    in the same network cannot see which phone it is or follow it.
+  * **Bluetooth (last resort, only to find the phone):** the same changing code plus the phone's
+    Wi-Fi address (encrypted) in a Bluetooth LE signal. If the computer can reach that address it
+    connects over Wi-Fi; otherwise it says so. **No files are ever sent over Bluetooth.**
+    Needs the Python package `bleak` (in requirements.txt) and the phone's "Nearby devices"
+    permission.
+* **Folders on the phone** – **Camera** adds Android's standard camera folder `DCIM/Camera`;
+  *Choose folders…* lists the phone's folders (screenshots `Pictures/Screenshots`, Samsung
+  `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
+  …) or lets you type one (*Select all* / *Select none*); *Remove*.
+  **Keep the phone's folder structure** (option): files from folders other than the camera
+  folder land in the same folders in the backup, e.g. `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
+  the camera folder is always sorted into year/month folders. Files already backed up stay
+  where they are; identical files are still stored only once.
+* **Backup destinations** – the list of destination drives.
+
+**Never the wrong phone.** Every backup folder remembers its phone in `.phonebackup/phone.json`
+(model, the phone's serial number, the phone app's key id; for older backups the program reads
+them from the reports). When you click *Start backup* the connected phone is identified live and
+compared: a different serial number or key → **refused, nothing copied**. If only the model can be
+compared, or the model does not match the backup's name, you have to confirm it. Right before the
+first file the phone is identified a second time (a swapped phone stops the backup). A phone that
+connects never replaces the smartphone name you set, and while a phone is on the USB cable no
+other phone is taken over Wi-Fi. The confirmation shows the connection and, if it is not the
+fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of USB 2). Tick one or more. *Add drive…* lists the connected
   external drives, including drives that are attached but not mounted yet (Linux: they are
   mounted with one click, no password). *Add folder…* opens a folder picker. A ticked drive
   that is attached but not mounted is mounted automatically when the backup starts. A preview shows exactly where the
   files will go. The phone is detected automatically as soon as it is plugged in via ADB.
+**Import, export, restore…** has four tabs:
+
 * **Import old backup** – two ways:
   * *Add to an existing backup* – adds old backups or any folders (mixed photos, videos, RAW,
     nested folders, duplicates) to one of your backups, sorted into the same year/month folders.
@@ -145,6 +221,38 @@ If ADB doesn't work, the program shows a clear warning and switches to the **MTP
   phone's USB notification.
 * Windows: needs `py -m pip install pywin32` once. Explorer then copies the files.
   This is slow, and it was not tested on real hardware during development (see below).
+
+## Phone app (Wi-Fi, no USB debugging)
+
+**Set up phone app…** shows a QR code. Scan it with the phone camera: the page (served by this
+computer) offers **1. Download the app** (open the file, tap *Install*) and **2. Connect app**.
+Phone and computer show the same 6-digit code - confirm it on the computer. Done once.
+
+For a backup: open *Fast Media Backup* on the phone → **Start backup mode**. The computer finds it and
+connects; after the backup the phone switches backup mode off itself (also after 30 minutes
+unused). The app can only read photos and videos; the connection is encrypted (TLS, certificate
+pinned while pairing). Same files and paths as over ADB, so existing backups simply continue.
+
+## Backup over Wi-Fi (no cable)
+
+Uses Android's built-in **Wireless debugging** (Android 11+, no app on the phone). Everything
+works as over USB, including the SHA-256 check on the phone; it is only slower (depends on the
+Wi-Fi, typically 10–40 MB/s).
+
+1. Phone: *Settings → System → Developer options → Wireless debugging* → on (allow it for the
+   network).
+2. App: **Pair over Wi-Fi…** → on the phone tap *Pair device with QR code* and scan the code
+   (or use *Pair device with pairing code* and type the 6 digits). Needed only once.
+3. From then on the phone is found automatically whenever Wireless debugging is on and phone and
+   computer are in the same Wi-Fi. If both USB and Wi-Fi are available, USB is used.
+
+**No router? Direct Wi-Fi:** **Direct Wi-Fi…** lets the computer open its own Wi-Fi network
+(Linux: NetworkManager hotspot, 5 GHz if possible; Windows: opens the *Mobile hotspot*
+settings). The phone joins it (QR code for the camera), and the backup runs directly between
+phone and computer. Most Wi-Fi adapters drop the normal Wi-Fi meanwhile; it returns when the
+direct Wi-Fi is stopped (the app asks when you close it).
+
+Real Wi-Fi Direct (P2P) would need a companion app on the phone; it is planned as a later step.
 
 ## Second storage (export)
 

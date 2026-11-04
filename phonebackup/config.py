@@ -13,7 +13,10 @@ DEFAULTS = {
     "adb_path": "",              # empty = search PATH and ./platform-tools
     "adb_wait_seconds": 20,      # how long to wait for the phone to appear via ADB
     "fsync": True,               # force data onto the disk before verifying
-    "keep_awake": True,          # block standby/shutdown while a job runs
+    "keep_awake": True,
+    "wifi_last_address": "",     # ip:port of the last wireless-debugging connection
+    "hotspot_ssid": "",          # direct Wi-Fi (laptop hotspot), generated on first use
+    "hotspot_password": "",          # block standby/shutdown while a job runs
 }
 
 
