@@ -1,70 +1,148 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.4] - 2026-11-05
 
-### Features
-- Phone app 0.3.2: backup mode switches off after **5 minutes** without use (was 30), with a
-  countdown on the phone; the phone shows "<computer> is copying …" (the computer pulls every file).
-- **Always the fastest connection, chosen automatically** (no manual choice): overview with the
-  speeds and the connection in use, log line "fastest / not the fastest + what to do", automatic
-  switch from Wi-Fi / MTP to the cable when USB debugging appears, button **Find the fastest
-  connection** (cable, Wi-Fi, Bluetooth). Destination list scrolls sideways for long names.
-- **Never back up the wrong phone** (`phoneid.py`): each backup folder remembers its phone (serial
-  number, phone-app key id, model; older backups from their reports); checked when Start is
-  clicked and again right before the first file - a different phone is refused. The name field is
-  never replaced by another phone; no Wi-Fi phone while a phone is on the cable. The start
-  confirmation shows the connection and how to make it faster if it is not the fastest.
-- New name: **Fast Smartphone Media Backup** (phone app: *Fast Media Backup*).
-- Simple start screen: **Your phones**, one entry per backup with its own **Update backup**
-  (same phone, folders and drives, only new files; enabled when that phone and a drive are
-  connected; older backups found on the drives; select all / remove from list), **New backup…**,
-  **Backup settings…**, **Import, export, restore…**. Folder lists per backup.
-- Backup settings as a subpage: phone connection with a speed overview of all connection types
-  (USB debugging via the phone app preselected), **Camera** button (`DCIM/Camera`) next to
-  *Choose folders…* and *Remove*.
-- USB debugging only for the backup: the phone app (installed and granted
-  `WRITE_SECURE_SETTINGS` over the cable once) switches USB debugging on (*Allow backup over
-  cable*); the computer switches USB / Wireless debugging off after every backup. The only
-  non-read-only commands are a fixed list in `phoneguard.CONTROL`.
-- Debugging switch-off rules, enforced by the phone app (0.3.0): 5 min without a backup start →
-  off; "still here" every 30 s, nothing for 2 min → off; one connection per backup (the other
-  debugging is switched off at the start); backup mode ends → off; the app never switches
-  Wireless debugging on.
-- Secure recognition by the phone's Keystore key: over the cable via `adb forward` (status
-  "verified"), pairing over the cable confirmed on the phone; anonymous Wi-Fi announcement
-  (random name, HMAC token changing every 10 min, no model / id); Bluetooth LE only to find the
-  phone (same token + encrypted address), never for files. New dependency: `bleak`.
-- Backup settings in two columns (everything visible without scrolling); *Select all* /
-  *Select none* in the folder chooser; option **keep the phone's folder structure** for folders
-  other than the camera folder (`layout.keep_structure_placement`).
-- Beginner's guide *Switch on USB debugging (first time)…*: detects the phone model on the USB
-  cable without debugging, steps for the common brands, web search for any other phone.
-- Backup over Wi-Fi with Android's Wireless debugging (ADB over Wi-Fi, no phone app): *Pair over
-  Wi-Fi…* (QR code or 6-digit code), paired phones are then found and connected automatically
-  (mDNS + last address); USB is preferred when both are available. Same SHA-256 check on the
-  phone as over USB; report shows "ADB over Wi-Fi".
-- *Direct Wi-Fi…*: the computer opens its own hotspot (Linux via NetworkManager, 5 GHz first;
-  Windows opens the Mobile hotspot settings) with a QR code for the phone - backups without a
-  router. The app offers to stop it on exit.
-- New dependency: `segno` (QR codes, pure Python).
-- Read-only guard (`phoneguard.py`): every command the app sends to the phone must match one of
-  a few fixed read-only templates (getprop, test -d, find/stat, sha256sum, cat) with all paths
-  inside /sdcard; anything else is refused before it reaches adb.
+The biggest update so far: a simple start screen, a phone app for backups without cables and
+without permanent USB debugging, Grandfather-Father-Son backups, and Google Drive.
 
-- Phone app "Media Backup" (android/, Kotlin): backups over Wi-Fi WITHOUT USB debugging. The app
-  may only read photos and videos (MediaStore); TLS with the phone's Keystore certificate pinned
-  by the computer + a secret per paired computer; SHA-256 on the phone; same paths as ADB, so
-  existing backups continue. "Set up phone app…" shows a QR code → page served by the computer
-  (download APK, "Connect app") → both show a 6-digit code → confirm. Backup mode on the phone
-  switches off after the backup (or after 30 min unused). Android 17: asks for local-network access.
-  Built with tools/build_companion.sh (1.6 MB, shipped in assets/companion/).
+### New name
+- The app is now called **My Smartphone Media Backup** (before: an earlier working title,
+  briefly *Fast Smartphone Media Backup*); the phone app is called **My Media Backup**. Program
+  files: `My-Smartphone-Media-Backup.exe` (Windows), `my-smartphone-media-backup` (Linux).
+  Existing backups, settings and phone pairings keep working unchanged.
+
+### Simpler to use
+- **Start screen "Your phones"**: one entry per backed-up phone with its size and its own
+  **Update backup** button (same phone, folders and drives – only new files). Older backups on the
+  connected drives are found automatically. Select several or *Select all*, *Remove from list*.
+- **New backup…** opens the backup settings; **gear button** = backup settings; everything else
+  (import, export, restore, settings) is under **Manage backups…**.
+- Backup settings in two columns: phone, folders (**Camera** button for `DCIM/Camera`, *Choose
+  folders…* with *Select all / Select none*, *Remove*), backup drives. The folder list is kept per
+  backup, folders that the connected phone does not have are left out. Option **keep the phone's
+  folder structure** for folders other than the camera.
+- **The fastest connection is chosen automatically** (cable with USB debugging › phone app over
+  Wi-Fi › Wireless debugging › MTP): an overview shows the speed of each connection type and which
+  one is in use; the app switches to the cable as soon as it is available; **Find the fastest
+  connection** checks cable, Wi-Fi and Bluetooth; the log says what would make it faster.
+- **Beginner's guide "Switch on USB debugging (first time)"**: recognises the phone model on the
+  cable even without debugging, step-by-step texts for the common brands, web search for others.
+- **Sizes everywhere**: size of each backup (files and GB) on the start screen, the Export tab and
+  the Import tab.
+- **Better progress**: percentage, files done and **to go**, current speed, time left and the
+  file(s) being copied right now – also for exports and Google Drive uploads.
+- **Summary at the end** of every job (backup, import, export, upload, restore): time, amount and
+  **average speed**; every report shows the average speed. The report is the log file
+  (**Open log file**); if a job stops with an error, its log is saved as a text file as well.
+- **Works in a small window** (e.g. half the screen): the window can be made much smaller; the
+  pages scroll while the start buttons (*Start backup / import / export / restore*) always stay
+  visible; *New backup* puts its two columns below each other when they do not fit; the progress
+  (percentage, files to go, amount, speed, time left, files now) is always shown in full on three
+  lines and is never squeezed – the log gives way first.
+- Settings: ADB in one line (*Ready – version …* or *Not installed* + **Download ADB…**), with an
+  ⓘ explanation; if ADB is missing, the app offers the download once at start.
+- Export tab: the backup is chosen by name like on the Import tab, with **Refresh** (mounts the
+  drives) and **Read from copy** when the backup is on several drives.
+
+### Phone app "My Media Backup" (Android, new – version 0.3.3)
+- Backups **over Wi-Fi without USB debugging**: the app may only *read* photos and videos. The
+  connection is encrypted (TLS) and tied to the phone's own key, which the computer remembers at
+  pairing; a secret per paired computer; every file is checked with SHA-256 on the phone.
+- Set up with **Set up phone app…**: QR code → download page served by the computer → both show a
+  6-digit code → confirm. Or pair over the cable with one tap.
+- **USB debugging only for the backup** (*Allow backup over cable*): the app switches USB
+  debugging on, the computer switches it off again after every backup. Safety switch-off by the
+  app: 5 minutes without a backup start, 2 minutes without a sign of life from the computer, end
+  of the backup, after a reboot – also if the app is updated or closed by Android meanwhile.
+  Wireless debugging is never switched on by the app; only one connection per backup.
+- **Backup mode** on the phone ends after the backup or after 5 minutes unused (with countdown);
+  the phone shows "<computer> is copying …".
+- Anonymous recognition: on Wi-Fi the phone announces itself with a random name and a token that
+  changes every 10 minutes (no model, no ID); Bluetooth LE is only used to *find* the phone, never
+  for files.
+- **Nothing is installed on a phone without asking**: before the phone app is installed, updated
+  or given its right over the cable, a dialog shows which phone (model and serial number), which
+  app and version, why, exactly what happens (install the bundled file – nothing downloaded –,
+  grant the right, open the app), what the app can and cannot do and how to remove it. *Not now*
+  is the default; the backup then works with USB debugging switched on by hand. Every install is
+  also written to the log.
+
+### Wi-Fi without the phone app
+- **Pair over Wi-Fi…** with Android's *Wireless debugging* (QR code or 6-digit code); paired
+  phones are connected automatically afterwards. Cable is preferred when both are there.
+- **Direct Wi-Fi…**: the computer opens its own hotspot (Linux; on Windows the hotspot settings
+  open) with a QR code for the phone – backups without a router.
+
+### Safety
+- **Never the wrong phone**: each backup folder remembers its phone (serial number, phone-app key,
+  model; older backups from their reports). Checked at *Start* and again right before the first
+  file – a different phone is refused. No Wi-Fi phone is used while a phone is on the cable.
+- **Read-only guard**: every command sent to the phone must match a short fixed list of read-only
+  commands with paths inside the phone's storage; the only exceptions (switching debugging off,
+  installing the bundled phone app) are a fixed list too.
+
+### Backup plans: Simple or Grandfather-Father-Son
+- **Per backup drive** you choose the plan in the drive list: *Simple* (one folder that grows, as
+  before) or *Grandfather-Father-Son* – mixable, e.g. simple on one HDD and GFS on the other.
+- **Grandfather-Father-Son**: dated **full** backups every 3 months (grandfather),
+  **differential** every month (father), **incremental** in between (son). A full/differential
+  also contains the earlier files it needs (copied on the drive, verified), so photos deleted from
+  the phone stay in every full. No empty incremental when nothing is new. The app shows which type
+  comes next and why.
+- **Cleanup**: GFS keeps the newest 4 full, 3 differential and 6 incremental backups plus
+  everything they need for a restore. Older ones are suggested for removal and deleted **only after
+  you confirm** (also via **Clean up old exports…**).
+- An existing backup folder keeps its plan (nothing is converted); for both plans on one drive use
+  two folders.
+
+### Second storage (export)
+- New export type **Automatic – Grandfather-Father-Son** (default) besides Full / Differential /
+  Incremental by hand; restores use the shortest chain (full + newest differential + incrementals
+  after it).
+- **Google Drive** (button **Add to cloud storage**, more services later), signing in through the
+  browser. The app may only see the files it uploaded itself (`drive.file`); the sign-in is stored
+  only on this computer. Two ways, chosen in *Export type*:
+  - **Copy** – a mirror of the backup in *My Drive/My Smartphone Media Backup/Phone - Owner*: only
+    new files are uploaded (3 at the same time), nothing is deleted or overwritten.
+  - **Grandfather-Father-Son** in *Phone - Owner (Grandfather-Father-Son)*: **every photo is
+    stored only once** – full and differential exports link to files already on Google Drive
+    (shortcuts: no extra space, done in seconds), also to the Copy, so switching from Copy to GFS
+    uploads nothing again. Cleanup moves files that newer exports still use into them before
+    deleting anything. **Restore from Google Drive** on the Restore tab.
+  - Every upload is checked against Google's own SHA-256; free space is checked before; the report
+    stays on the computer and is also uploaded to Google Drive.
+- The computer is kept awake during uploads, exports, restores and cleanups too.
+- Privacy policy: <https://machetso.github.io/my-smartphone-media-backup/privacy.html>
+
+### Faster
+- Cable (ADB) backups with many small files much faster: up to 64 files per request instead of
+  one request per file.
+- Wi-Fi backups through the phone app: the computer fetches up to 3 files ahead (measured with
+  many small files: 4.1 → 11.4 MB/s, the limit of the Wi-Fi link).
 
 ### Fixes
-- Wi-Fi backups through the phone app much faster with many small files (measured 4.1 → 11.4 MB/s,
-  the limit of the Wi-Fi link): the computer fetches up to 3 files ahead (max. 128 MB in memory,
-  checked against the phone's SHA-256 as before); the phone app (0.3.1) no longer rebuilds its
-  photo list every 20 s during a backup. An older phone app is updated automatically over the cable.
-- Wi-Fi pairing hung on Linux: adb's own mDNS found nothing, now Avahi is asked as well.
+- Wi-Fi pairing found nothing on Linux: Avahi is asked as well.
+- A phone on the cable with USB debugging switched off (e.g. after the last backup) was reported as
+  "No phone connected yet". Now the app says which phone is on the cable and what to tap.
+- Google Drive: a second app window (or computer) reading the export list could break a running
+  Grandfather-Father-Son export at its end ("attempt to write a readonly database"). Every run now
+  uses its own copy of the catalog; files of an export that stopped before it was recorded are
+  reused by the next export (moved after the SHA-256 check) instead of being uploaded again.
+- The folder list was shared by all phones (a Pixel's folders were offered for a Samsung): now per
+  backup, and folders the connected phone does not have are removed before the start.
+- The phone app's switch-off countdown was lost when the app was updated while USB debugging was
+  on.
+
+### Tested
+- Samsung Galaxy S20 FE over Wi-Fi with the phone app 0.3.3: 12.4 MB/s, no errors; phone app
+  update over the cable with the new install question.
+- Google Drive: 20 GB backup (1381 files) uploaded and verified; Grandfather-Father-Son with
+  shortcuts, cleanup and restore verified on the real Google Drive.
+
+### Notes
+- New dependencies: `segno` (QR codes), `bleak` (Bluetooth LE). No Google library is needed.
+- The phone app is shipped inside the program (`assets/companion/MediaBackup.apk`) and installed
+  over the cable on request.
 
 ## [0.9.3] - 2026-11-02
 

@@ -84,10 +84,11 @@ def safe_name(text):
     return text or "Unknown"
 
 
-def unique_path(path):
-    """name.jpg -> name_1.jpg, name_2.jpg ... until free."""
+def unique_path(path, taken=None):
+    """name.jpg -> name_1.jpg, name_2.jpg ... until free. taken(path) -> bool (default: exists)."""
     path = Path(path)
-    if not path.exists():
+    taken = taken or (lambda p: p.exists())
+    if not taken(path):
         return path
     stem, suffix = path.stem, path.suffix
     # keep double extensions like .MP.jpg intact
@@ -96,7 +97,7 @@ def unique_path(path):
     i = 1
     while True:
         cand = path.with_name(f"{stem}_{i}{suffix}")
-        if not cand.exists():
+        if not taken(cand):
             return cand
         i += 1
 

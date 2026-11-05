@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
         hasAccess = MediaIndex.hasFullAccess(this)
         hasNetwork = MediaIndex.hasLocalNetwork(this)
         canSwitchUsb = UsbDebug.canSwitch(this)
+        UsbDebug.Guard.tick(this)?.let { AppState.status = it }   // saved countdown (after update/kill)
         if (hasNetwork) waitingPair?.let { startPairing(it) }
     }
 
@@ -134,7 +135,7 @@ class MainActivity : ComponentActivity() {
             Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Fast Media Backup", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("My Media Backup", fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text("Lets your computer back up the photos and videos of this phone. " +
                 "The app can only READ photos and videos – it cannot delete or change anything. " +
                 "If the computer set it up, it can also switch USB debugging on for a backup over the cable.",

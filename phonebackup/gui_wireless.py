@@ -363,7 +363,7 @@ class PhoneAppDialog(QDialog):
         self.resize(640, 640)
         lay = QVBoxLayout(self)
         lay.addWidget(_label(
-            "The phone app <b>Fast Media Backup</b> backs up without USB debugging or developer options. "
+            "The phone app <b>My Media Backup</b> backs up without USB debugging or developer options. "
             "It may only <b>read photos and videos</b> – nothing else – and the connection is "
             "encrypted. Phone and computer must be in the same Wi-Fi (or the phone in the computer's "
             "Direct Wi-Fi)."))

@@ -1,4 +1,4 @@
-"""The phone app ("Fast Media Backup" companion): backups without ADB.
+"""The phone app ("My Media Backup" companion): backups without ADB.
 
 The phone app only has Android's permission to READ photos and videos. It runs a small TLS server
 while "backup mode" is on; this module talks to it:
@@ -37,9 +37,60 @@ from .sources import SourceFile, _dedupe, _run
 
 SERVICE_TYPE = "_phonebkp._tcp"
 APP_PACKAGE = "io.github.machetso.mediabackup"
-APP_VERSION_CODE = 5          # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_CODE = 6          # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_NAME = "0.3.3"    # its versionName (shown before installing)
+APP_NAME = "My Media Backup"
 DEFAULT_PORT = 47823
 SETUP_PORT = 47824
+
+
+def install_question(state, phone, serial, installed_version, apk_size):
+    """(title, text, details) shown BEFORE the phone app is installed / updated / given its right
+    over the cable – the user decides every time (user request 2026-11-05)."""
+    from html import escape
+    mb = f"{apk_size / 1e6:.1f} MB"
+    who = f"<b>{escape(phone)}</b> (serial number {escape(serial)}), connected by USB cable"
+    if state == "outdated":
+        title = "Update the app on the phone?"
+        head = (f"This program wants to <b>update</b> the app <b>“{APP_NAME}”</b> on {who} – from "
+                f"version {escape(installed_version or 'older')} to <b>{APP_VERSION_NAME}</b>.")
+        why = ("The version on the phone is older than the one included in this program. The "
+               "newer version is needed so that phone and computer understand each other and all "
+               "safety switch-offs work.")
+    elif state == "no-permission":
+        title = "Give the app on the phone a right?"
+        head = (f"The app <b>“{APP_NAME}”</b> is already on {who}, but it may not switch USB "
+                f"debugging yet. This program wants to install version <b>{APP_VERSION_NAME}</b> "
+                "over it and give it that right.")
+        why = ("So that you do not need the Developer options any more: the app switches USB "
+               "debugging on only for a backup, and it is switched off again afterwards.")
+    else:
+        title = "Install an app on the phone?"
+        head = (f"This program wants to <b>install</b> the app <b>“{APP_NAME}”</b> (version "
+                f"{APP_VERSION_NAME}) on {who}.")
+        why = ("So that you do not need the Developer options any more: the app switches USB "
+               "debugging on only for a backup, and it is switched off again afterwards. It also "
+               "lets you back up over Wi-Fi without USB debugging.")
+    text = f"{head}<br><br><b>Why:</b> {why}"
+    details = (
+        "What exactly happens now:\n"
+        f"1. The file MediaBackup.apk ({mb}) is installed on the phone (adb install). It is part of "
+        "this program – nothing is downloaded from the internet.\n"
+        "2. The app gets the special right “WRITE_SECURE_SETTINGS” (pm grant). It is needed to "
+        "switch USB debugging on and off and can only be given over the cable.\n"
+        "3. The app is opened on the phone; the first time you pair it with this computer (tap "
+        "“Pair” on the phone).\n\n"
+        "What the app does: it switches USB debugging on only when you tap “Allow backup over "
+        "cable”, and off again after the backup – automatically after 5 minutes without a backup, "
+        "2 minutes without contact to the computer, and after a restart. It reads photos and "
+        "videos only after you allow it on the phone, and sends them only to the paired computer "
+        "in your own Wi-Fi or over the cable (encrypted).\n"
+        "What it cannot do: delete or change photos, read other files, contacts or messages; it "
+        "contacts no server on the internet, has no ads and no tracking.\n\n"
+        "Remove it at any time on the phone: Settings → Apps → My Media Backup → Uninstall.\n\n"
+        "Nothing is installed if you choose “Not now” – the backup still works with USB debugging "
+        "switched on by hand.")
+    return title, text, details
 
 
 class CompanionError(Exception):
@@ -443,7 +494,7 @@ class CompanionSource:
 
     @property
     def description(self):
-        return (f"Phone app 'Fast Media Backup' {self.app_version} over Wi-Fi ({self.address}, TLS, "
+        return (f"Phone app 'My Media Backup' {self.app_version} over Wi-Fi ({self.address}, TLS, "
                 f"read-only), Android {self.android}")
 
     def is_connected(self):
@@ -781,7 +832,7 @@ class SetupServer:
                     if self.apk else "<p class='warn'>The app file is missing in this program.</p>")
         return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fast Media Backup – set up</title>
+<title>My Media Backup – set up</title>
 <style>
 body{{font-family:sans-serif;margin:0;padding:20px;max-width:560px;background:#fff;color:#222}}
 @media (prefers-color-scheme:dark){{body{{background:#121212;color:#eee}}}}
@@ -789,7 +840,7 @@ body{{font-family:sans-serif;margin:0;padding:20px;max-width:560px;background:#f
 color:#fff;text-decoration:none;font-size:18px;font-weight:600}}
 .btn2{{background:#1f8a4c}} small{{color:#888}} .warn{{color:#c62828}}
 </style></head><body>
-<h2>Fast Media Backup for {html.escape(self.pc_name)}</h2>
+<h2>My Media Backup for {html.escape(self.pc_name)}</h2>
 <p>This app lets the computer back up your photos and videos. It can only <b>read</b> photos and
 videos – nothing else, and it cannot delete or change anything.</p>
 {apk_link}

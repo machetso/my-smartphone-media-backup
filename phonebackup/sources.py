@@ -137,6 +137,8 @@ class AdbSource:
         if f"package:{phoneguard.COMPANION_PACKAGE}" not in out.split():
             return "missing"
         _rc, out = self.control("companion_granted")
+        m = re.search(r"versionName=(\S+)", out)
+        self.companion_version = m.group(1) if m else ""
         granted = re.search(r"android\.permission\.WRITE_SECURE_SETTINGS: granted=true", out)
         if not granted:
             return "no-permission"

@@ -68,9 +68,10 @@ def find_backups(cfg):
 
 
 def find_export_sets(cfg):
-    """Export sets ('Phone - Owner' with a catalog) inside the saved export targets."""
+    """Export sets ('Phone - Owner' with a catalog) inside the saved export targets - and
+    Grandfather-Father-Son backups on the backup drives (same layout)."""
     out = []
-    for base in cfg.get("export_targets", []):
+    for base in list(cfg.get("export_targets", [])) + list(cfg.get("destinations", [])):
         if not os.path.isdir(base):
             continue
         try:
@@ -78,7 +79,7 @@ def find_export_sets(cfg):
         except OSError:
             continue
         for e in entries:
-            if e.is_dir() and has_catalog(e.path):
+            if e.is_dir() and has_catalog(e.path) and e.path not in out:
                 out.append(e.path)
     return out
 

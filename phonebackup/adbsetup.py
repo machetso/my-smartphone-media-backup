@@ -172,7 +172,7 @@ def guide_steps(guide, with_app=True):
     """All steps as a list of strings."""
     steps = list(guide.developer) + list(guide.debugging) + [_PLUG_IN] + list(guide.extra)
     if with_app:
-        steps.append("This program then installs the small phone app “Fast Media Backup” once and "
+        steps.append("This program then installs the small phone app “My Media Backup” once and "
                      "gives it the right to switch USB debugging on and off. From then on: open the "
                      "app, tap “Allow backup over cable”, plug in – after the backup the computer "
                      "switches USB debugging off again.")

@@ -4,3 +4,4 @@ __pycache__/
 platform-tools/
 .phonebackup/
 .phonebackup-export/
+phonebackup/_gkey.py

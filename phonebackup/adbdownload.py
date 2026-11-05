@@ -93,7 +93,7 @@ def download_adb(cancel=None, url=None):
     try:
         zpath = work / "platform-tools.zip"
         ui.info(f"Downloading the Android platform-tools from Google:\n  {url}")
-        req = urllib.request.Request(url, headers={"User-Agent": "fast-smartphone-media-backup"})
+        req = urllib.request.Request(url, headers={"User-Agent": "my-smartphone-media-backup"})
         with urllib.request.urlopen(req, timeout=60) as resp, open(zpath, "wb") as out:
             total = int(resp.headers.get("Content-Length") or 0)
             if total > MAX_SIZE:

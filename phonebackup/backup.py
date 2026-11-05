@@ -32,9 +32,27 @@ class Dest:
     written_bytes: int = 0
     errors: int = 0
 
+    plan = "simple"
+
+    @property
+    def home(self):
+        """The backup folder ('Phone - Owner'); for a GFS plan the run folder is `parent`."""
+        return self.parent
+
+    @property
+    def report_dir(self):
+        return self.parent
+
     @property
     def tmp(self):
-        return self.parent / INTERNAL_DIR / "tmp"
+        return self.home / INTERNAL_DIR / "tmp"
+
+    def existing(self, final):
+        """The file already at this place in the backup (None if free)."""
+        return final if Path(final).exists() else None
+
+    def on_written(self, rel, size, mtime, sha):
+        pass
 
 
 @dataclass
@@ -62,9 +80,9 @@ def backup_parent_name(phone_name, owner):
 
 def _check_dest_alive(d):
     try:
-        if not d.parent.is_dir():
+        if not d.home.is_dir():
             d.alive, d.problem = False, "drive disconnected or folder no longer reachable"
-        elif shutil.disk_usage(d.parent).free < MIN_FREE:
+        elif shutil.disk_usage(d.home).free < MIN_FREE:
             d.alive, d.problem = False, "drive is full"
     except OSError as e:
         d.alive, d.problem = False, f"drive error: {e}"
@@ -162,14 +180,16 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
                 continue
             final = d.parent / reldir / safe_name(sf.name)
             status = "OK - copied and verified"
-            if final.exists():
-                if final.stat().st_size == sf.size and sha256_file(final) == stream_sha:
+            there = d.existing(final)
+            if there is not None:
+                if there.stat().st_size == sf.size and sha256_file(there) == stream_sha:
                     _remove(w.path)
                     rel = final.relative_to(d.parent).as_posix()
                     d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
                     res.per_dest[d.label] = ("DUPLICATE: identical file already in backup", rel)
                     continue
-                final = unique_path(final)
+                # GFS: a name is also taken when an earlier backup of the chain has it
+                final = unique_path(final, taken=lambda p: d.existing(p) is not None)
                 status = "OK - copied and verified (renamed: name already used by a different file)"
             final.parent.mkdir(parents=True, exist_ok=True)   # year/month folder only when needed
             os.replace(w.path, final)
@@ -180,6 +200,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
                     pass
             rel = final.relative_to(d.parent).as_posix()
             d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
+            d.on_written(rel, sf.size, sf.mtime, stream_sha)
             d.written += 1
             d.written_bytes += sf.size
             res.per_dest[d.label] = (status, rel)
@@ -203,16 +224,25 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     placement = keep_structure_placement(folders) if keep_structure else None
     where = "in the source folder" if mode == "import" else "on the phone"
     parent_name = parent_name or backup_parent_name(phone_name, owner)
+    from . import plans                       # backup plan per drive: simple or Grandfather-Father-Son
     dests = []
     for i, base in enumerate(dest_bases, 1):
-        parent = Path(base) / parent_name
-        parent.mkdir(parents=True, exist_ok=True)
-        d = Dest(f"Destination {i}", Path(base), parent, BackupIndex(parent))
+        want = plans.plan_of(cfg, base)
+        have = plans.folder_plan(Path(base) / parent_name)
+        if have and have != want and mode != "import":
+            ui.warn(f"  Destination {i}: {plans.check_switch(base, parent_name, want)} – this backup "
+                    f"uses the plan “{plans.NAMES[have]}” of the existing folder.")
+        if (have or want) == plans.GFS:
+            d = plans.open_gfs(f"Destination {i}", base, parent_name, started)
+        else:
+            parent = Path(base) / parent_name
+            parent.mkdir(parents=True, exist_ok=True)
+            d = Dest(f"Destination {i}", Path(base), parent, BackupIndex(parent))
         shutil.rmtree(d.tmp, ignore_errors=True)          # leftovers of an interrupted run
         d.tmp.mkdir(parents=True, exist_ok=True)
         dests.append(d)
     if hasattr(source, "staging"):
-        source.staging = dests[0].parent / INTERNAL_DIR / "staging"
+        source.staging = dests[0].home / INTERNAL_DIR / "staging"
 
     ui.info(f"Reading the file list {'of the source folder' if mode == 'import' else 'from the phone'} ...")
     files, missing = source.list_files(folders)
@@ -240,8 +270,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
                 f"({getattr(source, 'skip_text', 'not photo/video')}).")
 
     for d in dests:
-        needed = sum(sf.size for sf, _, need in todo if d in need)
-        free = shutil.disk_usage(d.parent).free
+        needed = sum(sf.size for sf, _, need in todo if d in need) + plans.carry_bytes(d)
+        free = shutil.disk_usage(d.home).free
         if needed > free - MIN_FREE:
             ui.warn(f"  {d.label} ({d.base}) has only {ui.human_size(free)} free, "
                     f"needs {ui.human_size(needed)}.")
@@ -294,7 +324,10 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
         for d in dests:
             shutil.rmtree(d.tmp, ignore_errors=True)
             if hasattr(source, "staging"):
-                shutil.rmtree(d.parent / INTERNAL_DIR / "staging", ignore_errors=True)
+                shutil.rmtree(d.home / INTERNAL_DIR / "staging", ignore_errors=True)
+    for d in dests:                           # GFS: full/differential also get the earlier files
+        if d.plan == plans.GFS:
+            status = plans.finish_gfs(d, status, cfg, cancel)
 
     finished = datetime.now()
     duration = time.monotonic() - t0
@@ -303,6 +336,7 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
                                            finished, duration, mode, source_label, parent_name)
     for d in dests:
         d.index.close()
+        plans.close(d)
     return status, paths, results, verdict
 
 
@@ -387,10 +421,15 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
         content = ", ".join(f"{CATEGORY_LABEL.get(c, c)}: {n} files / {ui.human_size(b)}"
                             for c, (n, b) in sorted(tot.items()))
         dest_items += [(f"{d.label}", str(d.parent)),
+                       (f"{d.label} backup plan", d.describe() if hasattr(d, "describe") else
+                        "Simple – one folder, only new files are added"),
                        (f"{d.label} state", state),
                        (f"{d.label} this run", f"{d.written} files written, {ui.human_size(d.written_bytes)}, "
                                                f"{d.errors} errors"),
                        (f"{d.label} whole backup", content or "empty")]
+        if getattr(d, "carried", 0):
+            dest_items.append((f"{d.label} earlier files in this {d.mode} backup",
+                               f"{d.carried} files, {ui.human_size(d.carried_bytes)} (copied on the drive)"))
     method = [("Source -> computer" if importing else "Phone -> computer",
                ("SHA-256 of every source file calculated separately and compared with the copied data"
                 if importing else "SHA-256 calculated on the phone and compared with the received data")
@@ -433,12 +472,13 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     paths = []
     basename = None
     for d in dests:
+        rdir = d.report_dir
         try:
-            if basename is None or (d.parent / (basename + ".txt")).exists():
-                basename = unique_basename(d.parent, report_base, started)
-            paths += write_reports(d.parent, basename, title, all_ok, verdict, sections, columns, rows)
+            if basename is None or (rdir / (basename + ".txt")).exists():
+                basename = unique_basename(rdir, report_base, started)
+            paths += write_reports(rdir, basename, title, all_ok, verdict, sections, columns, rows)
         except OSError as e:
-            ui.error(f"Could not write report to {d.parent}: {e}")
+            ui.error(f"Could not write report to {rdir}: {e}")
     if all_ok:
         ui.ok(verdict)
     else:

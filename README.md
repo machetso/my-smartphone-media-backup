@@ -1,4 +1,4 @@
-# Fast Smartphone Media Backup
+# My Smartphone Media Backup
 
 Verified, incremental backup of photos and videos from an Android phone to one or more
 external drives, sorted by year and month, with a report after every run.
@@ -26,7 +26,7 @@ enabled when exactly that phone and one of its drives are connected (same folder
 only new photos and videos). Backups made before this list existed are found on the connected
 drives. *Select all* / *Remove from list* hide phones (their backups stay on the drives). Below:
 **New backup…** (another phone, or other folders / drives), **Backup settings…** and
-**Import, export, restore…** (the tabs below).
+**Manage backups…** (the tabs below).
 
 **Backup settings** (subpage):
 
@@ -50,7 +50,7 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
   *Search the web for this phone* for any other. Android requires this once by hand – no program
   can switch USB debugging on before that.
   **Phone app switches it:** at the first USB-debugging connection the program offers to install
-  the phone app *Fast Media Backup* and give it the right to switch USB debugging (Android's
+  the phone app *My Media Backup* and give it the right to switch USB debugging (Android's
   `WRITE_SECURE_SETTINGS`, granted over the cable – the app cannot get it by itself). From then
   on: open the app → **Allow backup over cable** → plug in. After every backup the computer
   switches USB debugging (or Wireless debugging) off again (*Switch … off after the backup*, on
@@ -106,7 +106,7 @@ fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of US
   mounted with one click, no password). *Add folder…* opens a folder picker. A ticked drive
   that is attached but not mounted is mounted automatically when the backup starts. A preview shows exactly where the
   files will go. The phone is detected automatically as soon as it is plugged in via ADB.
-**Import, export, restore…** has four tabs:
+**Manage backups…** has four tabs:
 
 * **Import old backup** – two ways:
   * *Add to an existing backup* – adds old backups or any folders (mixed photos, videos, RAW,
@@ -123,9 +123,11 @@ fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of US
   screenshot folders are not. Every file is hashed at the source and verified after writing,
   identical files are stored only once (also against what is already in the backup), the old
   folders are only read. Skipped files are listed in the report “Import <name> <date>”.
-* **Second storage (export)** – pick the backup, the target drive and full / differential /
-  incremental. Earlier exports are listed.
-* **Restore** – pick the export set, the state and the target folder.
+* **Second storage (export)** – pick the backup, a second drive or **Google Drive** and the export
+  type (*Automatic – Grandfather-Father-Son* by default). Earlier exports are listed; old ones can
+  be cleaned up (only after you confirm). See *Second storage* below.
+* **Restore** – pick the export set (on a drive or on Google Drive), the state and the target
+  folder.
 * **Settings** – adb path (normally empty = found automatically), waiting time, fsync, keep the
   computer awake. Hover over a setting for an explanation.
 
@@ -232,7 +234,11 @@ If ADB doesn't work, the program shows a clear warning and switches to the **MTP
 computer) offers **1. Download the app** (open the file, tap *Install*) and **2. Connect app**.
 Phone and computer show the same 6-digit code - confirm it on the computer. Done once.
 
-For a backup: open *Fast Media Backup* on the phone → **Start backup mode**. The computer finds it and
+Over the cable the program can also install the app itself – it always **asks first** and
+explains which phone, which version, why and exactly what happens; nothing is installed without
+your click.
+
+For a backup: open *My Media Backup* on the phone → **Start backup mode**. The computer finds it and
 connects; after the backup the phone switches backup mode off itself (also after 5 minutes
 unused). The app can only read photos and videos; the connection is encrypted (TLS, certificate
 pinned while pairing). The computer **pulls** the files: it asks for every file, the phone only
@@ -259,9 +265,23 @@ direct Wi-Fi is stopped (the app asks when you close it).
 
 Real Wi-Fi Direct (P2P) would need a companion app on the phone; it is planned as a later step.
 
+## Backup plan per drive
+
+In the drive list of *New backup* each backup drive has a **Backup plan**:
+
+* **Simple** – one folder that grows, only new photos and videos are added (as shown above).
+* **Grandfather-Father-Son** – dated backups like on a second storage (see below): a **full**
+  backup every 3 months, a **differential** one every month, **incremental** ones in between.
+  A full/differential backup also contains the earlier files it needs (copied on the drive and
+  verified), so photos deleted from the phone stay in every full backup.
+
+Both can be mixed, e.g. *Simple* on one HDD and *Grandfather-Father-Son* on the other. A phone
+folder keeps the plan it was started with.
+
 ## Second storage (export)
 
-Menu item 2 copies a backup parent folder to another drive. Each run gets its own folder:
+*Manage backups → Second storage* copies a backup to another drive or to Google Drive. Each export
+gets its own folder:
 
 ```
 PhoneBackups-Export/Pixel 10 Pro - Sam/
@@ -277,9 +297,36 @@ PhoneBackups-Export/Pixel 10 Pro - Sam/
 | differential  | everything new since the last **full** export      |
 | incremental   | everything new since the **last** export (any type) |
 
+**Automatic – Grandfather-Father-Son** (default) picks the type: full every 3 months
+(grandfather), differential every month (father), incremental in between (son); the app shows
+which one comes next and why. It keeps the newest 4 full, 3 differential and 6 incremental
+exports plus everything they need for a restore; older ones are suggested for removal and deleted
+**only after you confirm** (*Clean up old exports…*).
+
 Every exported file is checked against the SHA-256 recorded at backup time. A file that was
 damaged on the first drive (bit rot) is reported as a WARNING.
-Menu item 3 (*Restore*) rebuilds one complete folder from full + later exports and verifies it.
+*Restore* rebuilds one complete folder from the shortest chain (full + newest differential +
+incrementals after it) and verifies every file.
+
+### Google Drive
+
+*Add to cloud storage → Google Drive* signs in through the browser. The app may only see the
+files it uploaded itself (Google's `drive.file` right); the sign-in stays on this computer.
+Two export types:
+
+* **Copy** – a mirror of the backup in *My Drive/My Smartphone Media Backup/Phone - Owner*:
+  only new files are uploaded, nothing is deleted or overwritten.
+* **Grandfather-Father-Son** in *Phone - Owner (Grandfather-Father-Son)*: every photo is stored
+  only **once** – full and differential exports link to files already on Google Drive
+  (shortcuts, no extra space; also to the Copy). Cleanup moves files that newer exports still
+  use into them before deleting anything. Restore downloads the files and verifies them. Please
+  do not delete single photos there by hand – every export that links to them would lose them.
+
+Every upload is checked against Google's own SHA-256; free space is checked before the upload.
+Privacy policy: <https://machetso.github.io/my-smartphone-media-backup/privacy.html>
+
+Builds from source need the app's Google key: `python3 tools/set_google_key.py client_secret_….json`
+(writes the git-ignored `phonebackup/_gkey.py`); release builds get it from GitHub secrets.
 
 ## Settings
 
@@ -297,6 +344,10 @@ python3 -m unittest discover tests
 
 * Linux (Pop!_OS) with a Google Pixel 10 Pro (Android 17) via ADB over USB 3:
   1372 files / 20 GB backed up to two external HDDs at the same time and verified, about 24 MB/s.
+* Samsung Galaxy S20 FE over USB (ADB) and over Wi-Fi with the phone app 0.3.3:
+  12.4 MB/s over Wi-Fi, no errors; phone app update over the cable with the install question.
+* Google Drive: Copy and Grandfather-Father-Son with a 20 GB backup (1381 files, about
+  4 MB/s upload), shortcuts, cleanup and restore verified.
 * Not yet tested on real hardware: the MTP fallback (Linux gvfs, Windows Explorer) and Windows in general.
 
 ## License

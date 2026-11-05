@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fast Smartphone Media Backup - start here.
+"""My Smartphone Media Backup - start here.
 
     python smartphone_media_backup.py            graphical interface (needs PySide6)
     python smartphone_media_backup.py --cli      terminal version (no extra packages)
@@ -9,7 +9,7 @@
 import sys
 
 if sys.version_info < (3, 8):
-    sys.exit("Fast Smartphone Media Backup needs Python 3.8 or newer.")
+    sys.exit("My Smartphone Media Backup needs Python 3.8 or newer.")
 
 
 def run():

@@ -1,8 +1,10 @@
 """Small terminal helpers: questions, colours, progress line, formatting."""
 
+import collections
 import os
 import shutil
 import sys
+import threading
 import time
 
 if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
@@ -71,6 +73,16 @@ def ask(prompt, default=None, allow_empty=False):
         if ans or allow_empty:
             return ans
         print("  Please enter a value.")
+
+
+def ask_install(title, text, details):
+    """Before anything is installed on a phone: always asked, never answered by default."""
+    if _handler and hasattr(_handler, "ask_install"):
+        return _handler.ask_install(title, text, details)
+    import re
+    plain = lambda t: re.sub(r"<[^>]+>", "", t.replace("<br>", "\n").replace("</li>", "\n"))
+    print(f"\n=== {title} ===\n{plain(text)}\n{plain(details)}")
+    return ask_yes_no("Install on the phone now?", default=False)
 
 
 def ask_yes_no(prompt, default=True):
@@ -143,8 +155,16 @@ def human_duration(seconds):
     return f"{s} s"
 
 
+last_transfer = None          # {"files", "bytes", "seconds"} of the last finished Progress (summary)
+
+
 class Progress:
-    """Single updating status line."""
+    """Single updating status line. Thread-safe: parallel uploads update it together.
+
+    Shows: percentage, files done / to go, current speed (last ~5 s, the average at the start),
+    time left, and the file(s) being copied right now (`begin` / `end` per file)."""
+
+    SPEED_WINDOW = 5.0
 
     def __init__(self, total_files, total_bytes):
         self.total_files = total_files
@@ -153,26 +173,58 @@ class Progress:
         self.bytes = 0
         self.start = time.monotonic()
         self._last = 0.0
+        self._lock = threading.Lock()
+        self._samples = collections.deque()          # (time, bytes) for the current speed
+        self._active = {}                            # token -> file name being copied now
+        self._n = 0
+
+    def begin(self, name):
+        """A file starts (several at once for parallel uploads). Returns a token for end()."""
+        with self._lock:
+            self._n += 1
+            self._active[self._n] = name
+            return self._n
+
+    def end(self, token, done=True):
+        with self._lock:
+            self._active.pop(token, None)
+            if done:
+                self.files += 1
+        self.update()
+
+    def _speed(self, now):
+        self._samples.append((now, self.bytes))
+        while len(self._samples) > 2 and now - self._samples[0][0] > self.SPEED_WINDOW:
+            self._samples.popleft()
+        t0, b0 = self._samples[0]
+        if now - self.start < self.SPEED_WINDOW or now - t0 < 1.0:
+            return self.bytes / max(now - self.start, 0.001)
+        return (self.bytes - b0) / (now - t0)
 
     def update(self, files_done=None, add_bytes=0, current="", force=False):
-        if files_done is not None:
-            self.files = files_done
-        self.bytes += add_bytes
-        now = time.monotonic()
-        if not force and now - self._last < 0.25:
-            return
-        self._last = now
-        elapsed = max(now - self.start, 0.001)
-        speed = self.bytes / elapsed
-        remaining = (self.total_bytes - self.bytes) / speed if speed > 0 else 0
-        pct = 100.0 * self.bytes / self.total_bytes if self.total_bytes else 100.0
-        line = (f"  {self.files}/{self.total_files} files  {pct:5.1f}%  "
+        with self._lock:
+            if files_done is not None:
+                self.files = files_done
+            self.bytes += add_bytes
+            now = time.monotonic()
+            if not force and now - self._last < 0.25:
+                return
+            self._last = now
+            speed = self._speed(now)
+            avg = self.bytes / max(now - self.start, 0.001)
+            remaining = (self.total_bytes - self.bytes) / speed if speed > 0 else 0
+            pct = 100.0 * self.bytes / self.total_bytes if self.total_bytes else 100.0
+            active = list(self._active.values()) or ([current] if current else [])
+            files = self.files
+        line = (f"  {pct:5.1f}%  {files}/{self.total_files} files  "
                 f"{human_size(self.bytes)}/{human_size(self.total_bytes)}  "
-                f"{human_size(speed)}/s  ETA {human_duration(remaining)}  {current}")
+                f"{human_size(speed)}/s  ETA {human_duration(remaining)}  {', '.join(active)}")
         if _handler:
-            _handler.progress({"files": self.files, "total_files": self.total_files,
+            _handler.progress({"files": files, "total_files": self.total_files,
+                               "to_go": max(self.total_files - files, 0), "percent": pct,
                                "bytes": self.bytes, "total_bytes": self.total_bytes,
-                               "speed": speed, "eta": remaining, "current": current})
+                               "speed": speed, "speed_avg": avg, "eta": remaining,
+                               "current": ", ".join(active), "active": active})
             return
         width = shutil.get_terminal_size((100, 20)).columns - 1
         line = line[:width]
@@ -181,6 +233,9 @@ class Progress:
             sys.stdout.flush()
 
     def finish(self):
+        global last_transfer
         self.update(force=True)
+        last_transfer = {"files": self.files, "bytes": self.bytes,
+                         "seconds": time.monotonic() - self.start}
         if not _handler and sys.stdout is not None and sys.stdout.isatty():
             sys.stdout.write("\n")

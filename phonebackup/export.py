@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import ui
+from . import gfs, ui
 from .copier import Cancelled, file_chunks, stream_copy
 from .index import INTERNAL_DIR, open_readonly_lookup
 from .report import unique_basename, write_reports
@@ -78,7 +78,19 @@ class Catalog:
             return None
         if mode == "differential":
             return self.files_of([full.id])
-        return self.files_of([r.id for r in self.runs() if r.id >= full.id])
+        runs = gfs.active(self.runs())
+        # incremental: the current state = the restore chain of the newest export
+        return self.files_of([r.id for r in gfs.chain(runs, runs[-1].id)]) if runs else {}
+
+    def drop_run(self, run_id):
+        """Forget an empty run (nothing was written)."""
+        self.db.execute("DELETE FROM files WHERE run_id=?", (run_id,))
+        self.db.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        self.db.commit()
+
+    def mark_removed(self, run_id):
+        self.db.execute("UPDATE runs SET status=? WHERE id=?", (gfs.REMOVED, run_id))
+        self.db.commit()
 
     def new_run(self, mode, folder, started):
         cur = self.db.execute("INSERT INTO runs(type,folder,started,status) VALUES (?,?,?,?)",
@@ -160,10 +172,15 @@ def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None
     return "OK - copied and verified", sha
 
 
-def perform_export(source_parent, target_base, mode, cfg, cancel=None):
+def perform_export(source_parent, target_base, mode, cfg, cancel=None, now=None):
     source_parent = Path(source_parent)
     target_parent = Path(target_base) / source_parent.name
     cat = Catalog(target_parent)
+    chosen_by = None
+    if mode == "auto":                         # Grandfather-Father-Son decides
+        mode, why = gfs.choose(cat.runs(), now)
+        chosen_by = f"Grandfather-Father-Son scheme: {gfs.ROLE[mode]} ({mode}) because {why}"
+        ui.info(chosen_by)
     baseline = cat.baseline(mode)
     if baseline is None:
         cat.close()
@@ -204,7 +221,11 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None):
         for i, (rel, sz, mt) in enumerate(todo, 1):
             k = known.get(rel)
             expected = k[1] if k and k[0] == sz else None
-            st, sha = _verified_copy(source_parent / rel, tmp, run_dir / rel, expected, cfg, prog, cancel)
+            token = prog.begin(Path(rel).name)
+            try:
+                st, sha = _verified_copy(source_parent / rel, tmp, run_dir / rel, expected, cfg, prog, cancel)
+            finally:
+                prog.end(token)
             if sha:
                 cat.add_file(run_id, rel, sz, mt, sha)
                 c = _category(rel)
@@ -217,7 +238,6 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None):
                 warnings += 1
             rows.append([i, Path(rel).name, _category(rel), ui.human_size(sz), sz, rel, st,
                          sha or "", f"{folder}/{rel}" if sha else ""])
-            prog.update(files_done=i, current=Path(rel).name)
     except (KeyboardInterrupt, Cancelled):
         status = "CANCELLED by user"
     finally:
@@ -239,14 +259,16 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None):
     elif mode == "differential":
         basis = f"last full export: {full.folder}"
     else:
-        basis = f"all exports since the last full export ({full.folder})"
+        basis = f"the current state since the last full export ({full.folder})"
     sections = [
-        ("General", [("Export type", mode), ("Status", status),
+        ("General", [("Export type", f"{mode} – {gfs.ROLE[mode]}"),
+                     ("Chosen by", chosen_by or "manual choice"), ("Status", status),
                      ("Source (backup folder)", str(source_parent)),
                      ("Target folder of this run", str(run_dir)),
                      ("Compared with", basis),
                      ("Started", f"{started:%Y-%m-%d %H:%M:%S}"),
-                     ("Duration", ui.human_duration(duration))]),
+                     ("Duration", ui.human_duration(duration)),
+                     ("Average speed", f"{ui.human_size(b / duration if duration > 0 else 0)}/s")]),
         ("Data exported", [("Total", f"{n} files, {ui.human_size(b)}")] +
          [(c.capitalize(), f"{v[0]} files, {ui.human_size(v[1])}") for c, v in sorted(by_cat.items())] +
          [("Files in backup", str(len(current))), ("Unchanged (not exported)", str(len(current) - len(todo))),
@@ -261,14 +283,49 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None):
 
 
 def restore_chain(cat, upto_id):
-    runs = [r for r in cat.runs() if r.id <= upto_id]
-    fulls = [r for r in runs if r.type == "full" and r.status == "COMPLETED"]
-    if not fulls:
-        return []
-    full = fulls[-1]
-    # Full + every later run. Each file is restored only once (from the newest run that
-    # contains it), so this is correct even if a differential run was interrupted.
-    return [full] + [r for r in runs if r.id > full.id]
+    """Exports needed to restore the state of export `upto_id`. Each file is restored only once
+    (from the newest export that contains it)."""
+    return gfs.chain(cat.runs(), upto_id)
+
+
+def remove_runs(target_parent, run_ids, keep=None):
+    """Delete retired exports (GFS cleanup, only after the user confirmed). Never deletes an
+    export that a remaining export needs. Returns (removed folders, problems)."""
+    target_parent = Path(target_parent).resolve()
+    cat = Catalog(target_parent)
+    try:
+        allowed = {r.id: r for r in gfs.to_retire(cat.runs(), keep)}
+        removed, problems = [], []
+        for rid in run_ids:
+            r = allowed.get(rid)
+            if r is None:
+                problems.append(f"export {rid} is still needed - not removed")
+                continue
+            folder = (target_parent / r.folder).resolve()
+            if folder.parent != target_parent or not r.folder or r.folder.startswith("."):
+                problems.append(f"{r.folder}: unexpected folder - not removed")
+                continue
+            try:
+                if folder.exists():
+                    shutil.rmtree(folder)
+                cat.mark_removed(rid)
+                removed.append(r.folder)
+            except OSError as e:
+                problems.append(f"{r.folder}: {e}")
+        return removed, problems
+    finally:
+        cat.close()
+
+
+def folder_size(path):
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for fn in files:
+            try:
+                total += os.stat(os.path.join(dirpath, fn)).st_size
+            except OSError:
+                pass
+    return total
 
 
 def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
@@ -312,7 +369,8 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     sections = [("General", [("Restored from", str(target_parent)),
                              ("Used exports", "\n".join(f"{r.type}: {r.folder}" for r in chain)),
                              ("Restored to", str(restore_dir)),
-                             ("Duration", ui.human_duration(time.monotonic() - t0))])]
+                             ("Duration", ui.human_duration(time.monotonic() - t0)),
+                             ("Average speed", f"{ui.human_size(prog.bytes / max(time.monotonic() - t0, 0.001))}/s")])]
     base = unique_basename(restore_dir, "Restore report", started)
     paths = write_reports(restore_dir, base, f"Restore {target_parent.name} - {started:%Y-%m-%d %H:%M}",
                           ok, verdict, sections,

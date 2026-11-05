@@ -6,7 +6,7 @@
 Writes:
     assets/icon.png                     512 px, transparent background (window icon)
     assets/icon.ico                     Windows icon, 16-256 px (program file, window)
-    assets/hicolor/<N>x<N>/apps/fast-smartphone-media-backup.png   Linux icon theme sizes
+    assets/hicolor/<N>x<N>/apps/my-smartphone-media-backup.png   Linux icon theme sizes
 
 The white background is turned transparent ("colour to alpha" from white, only in the area
 connected to the image border), so the soft shadow stays as a faint shadow and the white
@@ -23,7 +23,7 @@ from PySide6.QtGui import QGuiApplication, QImage, QPainter
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "assets" / "PhoneBKP_Logo.webp"
-NAME = "fast-smartphone-media-backup"
+NAME = "my-smartphone-media-backup"
 LINUX_SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 BG_MIN = 200          # a pixel belongs to the background area if all channels are at least this bright

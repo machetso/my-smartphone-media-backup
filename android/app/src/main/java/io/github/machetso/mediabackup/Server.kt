@@ -154,13 +154,13 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                 return keep
             }
             "POST /guard/alive" -> {
-                UsbDebug.Guard.alive()
+                UsbDebug.Guard.alive(ctx)
                 Response.json(out, 200, """{"ok":true}""", keep)
                 return keep
             }
             "POST /guard/end" -> {
                 val off = runCatching { jsonBody(req).optBoolean("off", true) }.getOrDefault(true)
-                if (off) UsbDebug.switchOff(ctx) else UsbDebug.Guard.reset()
+                if (off) UsbDebug.switchOff(ctx) else UsbDebug.Guard.reset(ctx)
                 Response.json(out, 200, """{"ok":true}""", keep)
                 return keep
             }

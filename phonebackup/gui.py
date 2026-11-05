@@ -14,29 +14,34 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QBoxLayout, QButtonGroup, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox,
-                               QSplitter, QStackedWidget, QStyle, QTabWidget, QTextEdit, QTreeWidget, QTreeWidgetItem,
+                               QSplitter, QStackedWidget, QStyle, QTabWidget, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 from . import APP_NAME, __version__, config, ui
 from .keepawake import KeepAwake, windows_block_shutdown
 from .backup import backup_parent_name, perform_backup
-from .export import Catalog, has_catalog, perform_export, perform_restore
+from .export import Catalog, folder_size, has_catalog, perform_export, perform_restore, remove_runs
+from . import gfs
+from . import gdrive, gdrive_gfs
+from .copier import Cancelled
 from .importer import (CAMERA, OTHER, check_selection, guess_kind, perform_old_phone_import,
                        perform_selection_import, scan_folder)
 from .layout import same_volume
+from .index import backup_totals, describe_totals
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, drive_label_of,
                         find_backups, find_export_sets, free_space, is_backup_folder,
                         mount_device, mount_for_paths)
 from .sources import AdbSource, adb_devices, connect_source, find_adb
 from . import adbsetup, lastbackup, phoneid, wireless
-from .companion import (AppGuard, CompanionSource, apk_path, ble_scan, find_phone,
+from .companion import (APP_NAME as COMPANION_NAME, APP_VERSION_NAME as COMPANION_VERSION, AppGuard,
+                        CompanionSource, apk_path, ble_scan, find_phone, install_question,
                         link_over_cable, pair_over_cable, phones as paired_phones, _port_open)
 from .gui_setup import ConnectionOverview, UsbDebugGuide
 
@@ -47,7 +52,7 @@ CAMERA_FOLDER = "DCIM/Camera"       # Android's standard camera folder (almost e
 GREEN, ORANGE, RED, GRAY = "#1f8a4c", "#c76a00", "#c62828", "#808080"
 
 
-DESKTOP_ID = "fast-smartphone-media-backup"   # matches the .desktop file / icon name on Linux
+DESKTOP_ID = "my-smartphone-media-backup"   # matches the .desktop file / icon name on Linux
 
 
 def app_icon():
@@ -116,6 +121,9 @@ class GuiHandler:
     def ask_yes_no(self, prompt, default=True):
         return self._ask("yesno", prompt, default)
 
+    def ask_install(self, title, text, details):
+        return self._ask("install", title, text, details)
+
     def choose(self, prompt, options, default=1):
         return self._ask("choose", prompt, options, default)
 
@@ -125,26 +133,45 @@ class GuiHandler:
 
 # =========================================================================== widgets
 
-class LocationList(QWidget):
-    """List of saved folders on drives. multi=True: tick several; False: select one."""
-    changed = Signal()
+GDRIVE = "gdrive:"                 # the Google Drive entry in a location list (second storage only)
+CLOUD_SERVICES = [("gdrive", "Google Drive")]      # more cloud storage in later versions
 
-    def __init__(self, cfg, key, sel_key, multi, default_folder, hint):
+
+def is_cloud(p):
+    return p == GDRIVE
+
+
+class LocationList(QWidget):
+    """List of saved folders on drives. multi=True: tick several; False: select one.
+    cloud=True: also "Add to cloud storage" (Google Drive), shown as its own entry."""
+    changed = Signal()
+    cloud_requested = Signal(str)
+
+    def __init__(self, cfg, key, sel_key, multi, default_folder, hint, cloud=False, plans_column=False):
         super().__init__()
+        self.cloud = cloud
+        self.plans_column = plans_column      # backup drives: "Backup plan" per drive
+        self.cloud_info = {}           # GDRIVE -> {"email", "free"} filled by the main window
         self.cfg, self.key, self.sel_key = cfg, key, sel_key
         self.multi, self.default_folder = multi, default_folder
         self.cfg.setdefault(sel_key, list(cfg.get(key, [])) if multi else cfg.get(key, [])[:1])
         self._updating = False
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Folder", "Status", "Free space"])
+        # backup drives: short name + plan first, the full folder last (long paths scroll sideways)
+        if plans_column:
+            self.col_status, self.col_free, self.col_plan, self.col_path = 2, 3, 1, 4
+            self.tree.setHeaderLabels(["Drive", "Backup plan", "Status", "Free space", "Folder"])
+        else:
+            self.col_status, self.col_free, self.col_plan, self.col_path = 1, 2, None, None
+            self.tree.setHeaderLabels(["Folder", "Status", "Free space"])
         self.tree.setRootIsDecorated(False)
         self.tree.setMinimumHeight(110)
         # long folder names: the column is as wide as the name and the list scrolls sideways;
         # status and free space only as wide as needed (user request 2026-11-04)
         h = self.tree.header()
         h.setStretchLastSection(False)
-        for col in (0, 1, 2):
+        for col in range(self.tree.columnCount()):
             h.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.tree.setTextElideMode(Qt.ElideNone)
@@ -167,6 +194,15 @@ class LocationList(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.btn_drive)
         buttons.addWidget(btn_folder)
+        if cloud:
+            self.btn_cloud = QPushButton("Add to cloud storage")
+            cmenu = QMenu(self.btn_cloud)
+            for key_, name in CLOUD_SERVICES:
+                cmenu.addAction(name, lambda k=key_: self.cloud_requested.emit(k))
+            self.btn_cloud.setMenu(cmenu)
+            self.btn_cloud.setToolTip("Mirror the backup to a cloud storage (Google Drive for now – "
+                                      "more services in later versions).")
+            buttons.addWidget(self.btn_cloud)
         buttons.addWidget(btn_remove)
         buttons.addStretch()
         lay = QVBoxLayout(self)
@@ -188,7 +224,11 @@ class LocationList(QWidget):
         return [p for p in self.cfg.get(self.sel_key, []) if p in self.paths()]
 
     def selected_available(self):
-        return [p for p in self.selected_paths() if os.path.isdir(p)]
+        return [p for p in self.selected_paths()
+                if (gdrive.signed_in_email() if is_cloud(p) else os.path.isdir(p))]
+
+    def add_cloud(self, entry):
+        self._add(entry)
 
     # ---- view
     def rebuild(self):
@@ -196,17 +236,64 @@ class LocationList(QWidget):
         self.tree.clear()
         sel = set(self.selected_paths())
         for p in self.paths():
-            it = QTreeWidgetItem([p, "", ""])
+            if self.plans_column:
+                parts = Path(p).parts
+                short = "/".join(parts[-2:]) if len(parts) > 1 else p
+                it = QTreeWidgetItem([short, "", "", "", p])
+            else:
+                it = QTreeWidgetItem(["Google Drive" if is_cloud(p) else p, "", ""])
             it.setData(0, Qt.UserRole, p)
-            it.setToolTip(0, p)
+            it.setToolTip(0, f"My Drive/{gdrive.ROOT_NAME}" if is_cloud(p) else p)
             if self.multi:
                 it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
                 it.setCheckState(0, Qt.Checked if p in sel else Qt.Unchecked)
             self.tree.addTopLevelItem(it)
             if not self.multi and p in sel:
                 it.setSelected(True)
+            if self.plans_column:
+                self.tree.setItemWidget(it, self.col_plan, self._plan_combo(p))
         self._updating = False
         self.update_status()
+
+    def _plan_combo(self, base):
+        from . import plans
+        cb = QComboBox()
+        for key_ in (plans.SIMPLE, plans.GFS):
+            cb.addItem(plans.NAMES[key_], key_)
+            cb.setItemData(cb.count() - 1, plans.DESCRIPTION[key_], Qt.ToolTipRole)
+        cb.setCurrentIndex(max(cb.findData(plans.plan_of(self.cfg, base)), 0))
+        cb.setToolTip("Simple: one folder that grows.\nGrandfather-Father-Son: dated full (every 3 months), "
+                      "differential (monthly) and incremental backups – older states can be restored.")
+        cb.currentIndexChanged.connect(lambda _i, b=base, c=cb: self._plan_changed(b, c))
+        return cb
+
+    def _plan_changed(self, base, cb):
+        from . import plans
+        plan = cb.currentData()
+        # phones that already have a backup with the other plan on this drive keep it
+        clash = []
+        if os.path.isdir(base):
+            for e in sorted(os.scandir(base), key=lambda e: e.name):
+                have = plans.folder_plan(e.path) if e.is_dir() else None
+                if have and have != plan:
+                    clash.append(e.name)
+        if clash:
+            r = QMessageBox.question(
+                self, "Backup plan",
+                f"On {base} these phones already have a {plans.NAMES[plans.SIMPLE if plan == plans.GFS else plans.GFS].lower()} "
+                f"backup:\n\n" + "\n".join(clash) +
+                f"\n\nTheir folders keep their plan (nothing is converted or deleted). The plan "
+                f"“{plans.NAMES[plan]}” is used for phones that are new on this drive.\n\n"
+                "Tip: for a Grandfather-Father-Son backup of the same phone add another folder on the "
+                "drive (e.g. “PhoneBackups-GFS”).\n\nChange the plan anyway?")
+            if r != QMessageBox.Yes:
+                cb.blockSignals(True)
+                cb.setCurrentIndex(cb.findData(plans.plan_of(self.cfg, base)))
+                cb.blockSignals(False)
+                return
+        plans.set_plan(self.cfg, base, plan)
+        config.save(self.cfg)
+        self.changed.emit()
 
     def update_status(self):
         self._updating = True       # setText/setForeground also fire itemChanged
@@ -214,6 +301,16 @@ class LocationList(QWidget):
         for i in range(self.tree.topLevelItemCount()):
             it = self.tree.topLevelItem(i)
             p = it.data(0, Qt.UserRole)
+            if is_cloud(p):
+                email = gdrive.signed_in_email()
+                info = self.cloud_info.get(p) or {}
+                it.setText(0, f"Google Drive ({email})" if email else "Google Drive")
+                it.setText(1, "signed in" if email else "not signed in – click “Add to cloud storage”")
+                it.setForeground(1, QColor(GREEN if email else ORANGE))
+                free = info.get("free") if email and info.get("email") == email else None
+                it.setText(2, ui.human_size(free) if free is not None else
+                           ("no limit" if email and info.get("email") == email else "–"))
+                continue
             avail = os.path.isdir(p)
             free = free_space(p) if avail else None
             status, color = ("connected", GREEN) if avail else ("not connected", GRAY)
@@ -222,10 +319,12 @@ class LocationList(QWidget):
                     unmounted_labels = {d["label"] for d in detect_unmounted()}
                 if drive_label_of(p) in unmounted_labels:
                     status, color = "attached, not mounted (mounted automatically at start)", ORANGE
-            it.setText(1, status)
-            it.setForeground(1, QColor(color))
-            it.setForeground(0, QColor(self.palette().text().color() if avail else QColor(GRAY)))
-            it.setText(2, ui.human_size(free) if free is not None else "–")
+            it.setText(self.col_status, status)
+            it.setForeground(self.col_status, QColor(color))
+            for col in (0, self.col_path):
+                if col is not None:
+                    it.setForeground(col, QColor(self.palette().text().color() if avail else QColor(GRAY)))
+            it.setText(self.col_free, ui.human_size(free) if free is not None else "–")
         self._updating = False
 
     # ---- events
@@ -301,12 +400,13 @@ class LocationList(QWidget):
             self._add(p)
 
     def _add(self, path):
-        try:
-            Path(path).mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            QMessageBox.critical(self, APP_NAME, f"Cannot create the folder:\n{path}\n\n{e}")
-            return
-        path = str(Path(path).resolve())
+        if not is_cloud(path):
+            try:
+                Path(path).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                QMessageBox.critical(self, APP_NAME, f"Cannot create the folder:\n{path}\n\n{e}")
+                return
+            path = str(Path(path).resolve())
         lst = self.paths()
         if path not in lst:
             lst.append(path)
@@ -328,9 +428,22 @@ class LocationList(QWidget):
             QMessageBox.information(self, APP_NAME, "Click a folder in the list first.")
             return
         p = it.data(0, Qt.UserRole)
-        if QMessageBox.question(self, "Remove from list",
-                                f"Remove this folder from the list?\n\n{p}\n\n"
-                                "The files on the drive are NOT deleted.") != QMessageBox.Yes:
+        if is_cloud(p):
+            box = QMessageBox(QMessageBox.Question, "Remove from list",
+                              "Remove Google Drive from the list?\n\nThe files on Google Drive are NOT "
+                              "deleted.", parent=self)
+            rm_only = box.addButton("Remove", QMessageBox.AcceptRole)
+            rm_out = box.addButton("Remove and sign out", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Cancel)
+            box.exec()
+            if box.clickedButton() not in (rm_only, rm_out):
+                return
+            if box.clickedButton() is rm_out:
+                gdrive.sign_out()
+                ui.info("Signed out of Google Drive.")
+        elif QMessageBox.question(self, "Remove from list",
+                                  f"Remove this folder from the list?\n\n{p}\n\n"
+                                  "The files on the drive are NOT deleted.") != QMessageBox.Yes:
             return
         self.cfg[self.key] = [x for x in self.paths() if x != p]
         self.cfg[self.sel_key] = [x for x in self.cfg.get(self.sel_key, []) if x != p]
@@ -527,6 +640,31 @@ def _big_button(text):
 
 # =========================================================================== main window
 
+def gear_icon(color, size=64):
+    """Settings gear like in VideoSpeedControl: 8 teeth around a ring with a hole, drawn here."""
+    import math
+    path = QPainterPath()
+    path.setFillRule(Qt.OddEvenFill)
+    pts = []
+    for i in range(8):
+        a = i * 2 * math.pi / 8
+        for da, r in ((-0.30, 8.0), (-0.17, 11.0), (0.17, 11.0), (0.30, 8.0)):
+            pts.append((12 + r * math.cos(a + da), 12 + r * math.sin(a + da)))
+    path.moveTo(*pts[0])
+    for x, y in pts[1:]:
+        path.lineTo(x, y)
+    path.closeSubpath()
+    path.addEllipse(8.5, 8.5, 7, 7)                      # the hole
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.scale(size / 24, size / 24)
+    p.fillPath(path, QColor(color))
+    p.end()
+    return QIcon(pm)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -549,6 +687,9 @@ class MainWindow(QMainWindow):
         self.source = None
         self.last_report = None
         self.last_folder = None
+        self._job = None
+        self._gdrive_runs = {}          # set name -> (runs, sizes) | "loading"   (GFS on Google Drive)
+        self._gdrive_sets = None        # names of the GFS backups on Google Drive (restore tab)
         self._close_when_idle = False
         self._adb_retry_at = 0.0
         self._stop = threading.Event()
@@ -560,25 +701,38 @@ class MainWindow(QMainWindow):
 
         # start screen → backup settings (subpage) / more (the other tabs)  - user request 2026-11-04
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_import_tab(), "Import old backup")
-        self.tabs.addTab(self._build_export_tab(), "Second storage (export)")
-        self.tabs.addTab(self._build_restore_tab(), "Restore")
-        self.tabs.addTab(self._build_settings_tab(), "Settings")
+        # contents scroll when the window is small, the start buttons always stay visible
+        self.tabs.addTab(self._scroll_page(self._build_import_tab(), self.start_import_btn),
+                         "Import old backup")
+        self.tabs.addTab(self._scroll_page(self._build_export_tab(), self.start_export_btn),
+                         "Second storage (export)")
+        self.tabs.addTab(self._scroll_page(self._build_restore_tab(), self.start_restore_btn), "Restore")
+        self.tabs.addTab(self._scroll_page(self._build_settings_tab()), "Settings")
         self.tabs.currentChanged.connect(self._tab_changed)
         self.pages = QStackedWidget()
         self.home_page = self._build_home()
         self.backup_page = self._build_backup_page()
-        self.more_page = self._subpage("More", self.tabs)
+        self.more_page = self._subpage("Manage backups", self.tabs)
         for page in (self.home_page, self.backup_page, self.more_page):
             self.pages.addWidget(page)
 
+        # pages and log share the height (the log gives way first); the progress panel below is
+        # never squeezed – all upload/copy information visible without scrolling
+        bottom = self._build_bottom()
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.pages)
-        splitter.addWidget(self._build_bottom())
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([640, 200])
-        self.setCentralWidget(splitter)
+        splitter.addWidget(self.log)
+        splitter.setStretchFactor(0, 1)          # more height goes to the page, not the log
+        splitter.setStretchFactor(1, 0)
+        splitter.setCollapsible(0, False)
+        splitter.setSizes([800, 90])
+        central = QWidget()
+        cl = QVBoxLayout(central)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addWidget(splitter, 1)
+        cl.addWidget(bottom)
+        self.setCentralWidget(central)
         self._phone_status_text = ("Looking for a phone …", GRAY)
         self._set_phone_status("Looking for a phone …", GRAY)
         self._companion_asked = set()
@@ -593,14 +747,36 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._periodic)
         self.timer.start(3000)
+        if not os.environ.get("PHONEBACKUP_NO_ADB_OFFER"):
+            QTimer.singleShot(1500, self._offer_adb_download)     # ADB missing → ask once
         threading.Thread(target=self._adb_poller, daemon=True).start()
         lastbackup.discover(self.cfg)          # backups on the drives made before the phone list
         self._update_preview()
         self._update_home()
 
     # ------------------------------------------------------------------ tabs
-    def _subpage(self, title, content, scroll=False):
-        """A page with '← Back' and a title above `content`."""
+    @staticmethod
+    def _scroll_page(content, action=None):
+        """`content` in a scroll area (small windows), `action` (a start button) fixed below it."""
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.NoFrame)
+        area.setWidget(content)
+        if action is None:
+            return area
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(area, 1)
+        row = QHBoxLayout()
+        row.setContentsMargins(9, 0, 9, 6)
+        row.addStretch()
+        row.addWidget(action)
+        lay.addLayout(row)
+        return w
+
+    def _subpage(self, title, content, scroll=False, action=None):
+        """A page with '← Back' and a title above `content` (and a fixed start button below)."""
         w = QWidget()
         lay = QVBoxLayout(w)
         head = QHBoxLayout()
@@ -612,13 +788,8 @@ class MainWindow(QMainWindow):
         head.addSpacing(10)
         head.addWidget(lab, 1)
         lay.addLayout(head)
-        if scroll:
-            area = QScrollArea()
-            area.setWidgetResizable(True)
-            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            area.setFrameShape(QScrollArea.NoFrame)
-            area.setWidget(content)
-            content = area
+        if scroll or action is not None:
+            content = self._scroll_page(content, action)
         lay.addWidget(content, 1)
         w.title_label = lab
         return w
@@ -671,10 +842,14 @@ class MainWindow(QMainWindow):
         new.setToolTip("Another phone, or other folders / drives: choose the connection, folders and "
                        "drives, then start.")
         new.clicked.connect(lambda: self._open_backup_page(True))
-        settings = QPushButton("Backup settings…")
-        settings.setMinimumHeight(40)
+        settings = QToolButton()
+        settings.setIcon(gear_icon(self.palette().buttonText().color()))
+        settings.setIconSize(QSize(26, 26))
+        settings.setFixedSize(44, 44)
+        settings.setToolTip("Backup settings – phone connection, folders and drives")
+        settings.setAccessibleName("Backup settings")
         settings.clicked.connect(lambda: self._open_backup_page(False))
-        more = QPushButton("Import, export, restore…")
+        more = QPushButton("Manage backups…")
         more.setMinimumHeight(40)
         more.setToolTip("Import old backups, copy backups to a second storage (export), restore, "
                         "program settings.")
@@ -700,8 +875,11 @@ class MainWindow(QMainWindow):
     def _build_backup_page(self):
         # two columns, so everything is visible without scrolling (user request 2026-11-04):
         # left = who + phone connection, right = folders + destinations + start
+        # (narrow window, e.g. half the screen: the columns are stacked – see resizeEvent)
         w = QWidget()
         cols = QHBoxLayout(w)
+        self._backup_cols = cols
+        self._backup_cols_w = w
         lay = QVBoxLayout()
         right = QVBoxLayout()
         cols.addLayout(lay, 1)
@@ -749,7 +927,7 @@ class MainWindow(QMainWindow):
                                     "phone joins it directly.")
         self.hotspot_btn.clicked.connect(self._direct_wifi)
         self.app_btn = QPushButton("Set up phone app over Wi-Fi…")
-        self.app_btn.setToolTip("Phone app 'Fast Media Backup': backups over Wi-Fi without USB debugging. "
+        self.app_btn.setToolTip("Phone app 'My Media Backup': backups over Wi-Fi without USB debugging. "
                                 "It may only read photos and videos.")
         self.app_btn.clicked.connect(self._setup_phone_app)
         self.fastest_btn = QPushButton("Find the fastest connection")
@@ -817,7 +995,7 @@ class MainWindow(QMainWindow):
         self.dest_list = LocationList(
             self.cfg, "destinations", "selected_destinations", True, "PhoneBackups",
             "Tick one or more drives - all ticked drives are written at the same time. "
-            "Use “Add drive…” for a connected external drive or “Add folder…” to pick any folder.")
+            "Use “Add drive…” for a connected external drive or “Add folder…” to pick any folder.", plans_column=True)
         self.dest_list.changed.connect(self._update_preview)
         right.addWidget(_group("Backup destinations", self.dest_list), 1)
 
@@ -828,9 +1006,8 @@ class MainWindow(QMainWindow):
 
         self.start_backup_btn = _big_button("Start backup")
         self.start_backup_btn.clicked.connect(lambda: self._start_backup())
-        right.addWidget(self.start_backup_btn, 0, Qt.AlignRight)
         lay.addStretch()
-        return self._subpage("New backup", w, scroll=True)
+        return self._subpage("New backup", w, scroll=True, action=self.start_backup_btn)
 
     def _build_import_tab(self):
         w = QWidget()
@@ -895,6 +1072,8 @@ class MainWindow(QMainWindow):
         v.addWidget(hint)
         self.import_copies = QListWidget()
         v.addWidget(self.import_copies)
+        self.import_size = QLabel()
+        v.addWidget(self.import_size)
         lay.addWidget(_group("Import into backup", self.import_existing_box), 1)
         self.import_existing_group = self.import_existing_box.parentWidget()
 
@@ -912,7 +1091,7 @@ class MainWindow(QMainWindow):
         v.addLayout(form)
         self.import_dest_list = LocationList(
             self.cfg, "destinations", "import_selected_destinations", True, "PhoneBackups",
-            "Tick the drive(s) to write the old phone's backup to – all ticked drives at the same time.")
+            "Tick the drive(s) to write the old phone's backup to – all ticked drives at the same time.", plans_column=True)
         self.import_dest_list.changed.connect(self._update_import_preview)
         v.addWidget(self.import_dest_list, 1)
         self.import_preview = QLabel()
@@ -926,7 +1105,6 @@ class MainWindow(QMainWindow):
 
         self.start_import_btn = _big_button("Start import")
         self.start_import_btn.clicked.connect(self._start_import)
-        lay.addWidget(self.start_import_btn, 0, Qt.AlignRight)
         self._import_mode_changed()
         self._fill_import_targets()
         return w
@@ -1071,12 +1249,19 @@ class MainWindow(QMainWindow):
                                  "or connect the drives and click Refresh.")
             it.setFlags(Qt.NoItemFlags)
             self.import_copies.addItem(it)
-        for p in copies:
-            it = QListWidgetItem(p)
+        sizes = [backup_totals(p) for p in copies]
+        for p, t in zip(copies, sizes):
+            it = QListWidgetItem(f"{p}    ({describe_totals(t)})")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked)
             it.setData(Qt.UserRole, p)
             self.import_copies.addItem(it)
+
+        known = [t for t in sizes if t]
+        self.import_size.setText(
+            f"Current state of the backup: <b>{describe_totals(max(known, key=lambda t: t[0]))}</b>"
+            + ("  (the copies differ – the largest is shown)" if len(set(known)) > 1 else "")
+            if known else "")
 
     def _start_import(self):
         sel = self._import_selections()
@@ -1151,25 +1336,49 @@ class MainWindow(QMainWindow):
     def _build_export_tab(self):
         w = QWidget()
         lay = QVBoxLayout(w)
+        box = QVBoxLayout()
         row = QHBoxLayout()
-        self.export_src = QComboBox()
-        self.export_src.currentIndexChanged.connect(self._refresh_export_info)
+        self.export_set = QComboBox()
+        self.export_set.currentIndexChanged.connect(lambda *_: self._fill_export_copies())
+        refresh = QPushButton("Refresh")
+        refresh.setToolTip("Search the saved backup drives again (attached drives are mounted)")
+        refresh.clicked.connect(lambda: self._fill_export_sources(mount=True))
         b = QPushButton("Browse…")
+        b.setToolTip("Choose a backup folder (“Phone - Owner”) that is not on a saved drive")
         b.clicked.connect(self._browse_export_src)
-        row.addWidget(self.export_src, 1)
+        row.addWidget(self.export_set, 1)
+        row.addWidget(refresh)
         row.addWidget(b)
-        lay.addWidget(_group("Backup to export (folder “Phone - Owner” on the first drive)", row))
+        box.addLayout(row)
+        row = QHBoxLayout()
+        lbl = QLabel("Read from copy:")
+        lbl.setStyleSheet(f"color:{GRAY}")
+        self.export_src = QComboBox()
+        self.export_src.setToolTip("The backup is on several drives – choose which copy is read")
+        self.export_src.currentIndexChanged.connect(self._refresh_export_info)
+        row.addWidget(lbl)
+        row.addWidget(self.export_src, 1)
+        box.addLayout(row)
+        self.export_size = QLabel()
+        box.addWidget(self.export_size)
+        lay.addWidget(_group("Backup to export", box))
 
         self.export_targets = LocationList(
             self.cfg, "export_targets", "selected_export_target", False, "PhoneBackups-Export",
-            "Click the drive/folder to export to (a different drive than the backup).")
+            "Click the drive, folder or cloud storage to export to (a different drive than the backup).",
+            cloud=True)
         self.export_targets.changed.connect(self._refresh_export_info)
+        self.export_targets.cloud_requested.connect(self._add_cloud)
         lay.addWidget(_group("Second storage", self.export_targets), 1)
 
         mode_box = QVBoxLayout()
         self.mode_group = QButtonGroup(self)
         self.mode_buttons = {}
         for i, (m, text) in enumerate([
+                ("mirror", "Copy – a mirror of the backup: only new files are uploaded, nothing is "
+                           "deleted or overwritten"),
+                ("auto", "Automatic – Grandfather-Father-Son: full every 3 months, differential "
+                         "every month, incremental in between"),
                 ("full", "Full – copy everything"),
                 ("differential", "Differential – everything new since the last FULL export"),
                 ("incremental", "Incremental – everything new since the LAST export (any type)")]):
@@ -1177,19 +1386,35 @@ class MainWindow(QMainWindow):
             self.mode_group.addButton(rb, i)
             self.mode_buttons[m] = rb
             mode_box.addWidget(rb)
-        self.mode_buttons["incremental"].setChecked(True)
+        self._show_modes(cloud=False)
+        self.mode_group.idClicked.connect(self._export_mode_clicked)
+        mode_w = QWidget()
+        mode_box.setContentsMargins(0, 0, 0, 0)
+        mode_w.setLayout(mode_box)
+        lay.addWidget(_group("Export type", mode_w))
+        self.export_mode_group = mode_w.parentWidget()
         self.export_hint = QLabel()
         self.export_hint.setWordWrap(True)
-        mode_box.addWidget(self.export_hint)
-        lay.addWidget(_group("Export type", mode_box))
+        lay.addWidget(self.export_hint)
 
         self.export_runs = QListWidget()
         self.export_runs.setMaximumHeight(120)
-        lay.addWidget(_group("Previous exports on this storage", self.export_runs))
+        self.export_runs.itemDoubleClicked.connect(
+            lambda it: self._open(it.data(Qt.UserRole)) if it.data(Qt.UserRole) else None)
+        runs_box = QVBoxLayout()
+        runs_box.addWidget(self.export_runs)
+        crow = QHBoxLayout()
+        self.export_cleanup_btn = QPushButton("Clean up old exports…")
+        self.export_cleanup_btn.setToolTip("Shows the exports the Grandfather-Father-Son scheme no longer "
+                                           "needs – they are only deleted after you confirm.")
+        self.export_cleanup_btn.clicked.connect(lambda: self._cleanup_exports())
+        crow.addWidget(self.export_cleanup_btn)
+        crow.addStretch()
+        runs_box.addLayout(crow)
+        lay.addWidget(_group("Previous exports on this storage", runs_box))
 
         self.start_export_btn = _big_button("Start export")
         self.start_export_btn.clicked.connect(self._start_export)
-        lay.addWidget(self.start_export_btn, 0, Qt.AlignRight)
         self._fill_export_sources()
         return w
 
@@ -1217,48 +1442,41 @@ class MainWindow(QMainWindow):
         lay.addWidget(_group("Restore into", row2))
         self.start_restore_btn = _big_button("Start restore")
         self.start_restore_btn.clicked.connect(self._start_restore)
-        lay.addWidget(self.start_restore_btn, 0, Qt.AlignRight)
         self._fill_restore_sets()
         return w
 
     def _build_settings_tab(self):
         w = QWidget()
         form = QFormLayout(w)
+        # ADB: one status line; details behind ⓘ, rarely needed choices behind "Change…"
+        self.adb_custom = self.cfg.get("adb_path", "")
         row = QHBoxLayout()
-        self.adb_edit = QLineEdit(self.cfg.get("adb_path", ""))
-        self.adb_edit.setPlaceholderText("empty = find automatically")
-        b = QPushButton("Browse…")
-        b.clicked.connect(self._browse_adb)
+        self.adb_status = QLabel()
+        self.adb_status.setTextFormat(Qt.RichText)
+        self.adb_status.setWordWrap(True)
         self.adb_download_btn = QPushButton("Download ADB…")
-        self.adb_download_btn.setToolTip("Downloads Google's official Android platform-tools (adb) "
-                                         "directly from Google and sets it up for this app.")
+        self.adb_download_btn.setToolTip("Downloads Google's official ADB tool (about 10 MB) – one click, "
+                                         "no installation, no admin rights.")
         self.adb_download_btn.clicked.connect(self._download_adb)
-        row.addWidget(self.adb_edit, 1)
-        row.addWidget(b)
+        info_btn = QToolButton()
+        info_btn.setText("ⓘ")
+        info_btn.setToolTip("What is ADB?")
+        info_btn.setAutoRaise(True)
+        info_btn.clicked.connect(self._adb_info)
+        change = QToolButton()
+        change.setText("Change…")
+        change.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(change)
+        menu.addAction("Find ADB automatically (recommended)", self._adb_auto)
+        menu.addAction("Use another adb program…", self._browse_adb)
+        menu.addAction("Download the newest ADB from Google…", self._download_adb)
+        change.setMenu(menu)
+        row.addWidget(self.adb_status, 1)
         row.addWidget(self.adb_download_btn)
-        adb_tip = (
-            "<b>ADB (Android Debug Bridge)</b> is Google's tool for talking to an Android phone over USB.<br>"
-            "The app uses it to find the phone, list its photos, check every file with SHA-256 "
-            "<i>on the phone</i> and copy quickly.<br><br>"
-            "<b>Leave empty</b>: adb is found automatically (next to the program in "
-            "<i>platform-tools</i>, on the system path, or in the Android SDK).<br>"
-            "Only enter a path if adb is somewhere else.<br><br>"
-            "ADB is much faster than MTP (the normal phone file transfer): about 45–50 MB/s over USB 3 "
-            "here, MTP typically 10–20 MB/s. Without ADB the app falls back to MTP, and the files can "
-            "then only be checked on the computer, not on the phone.<br>"
-            "On the phone: Developer options → USB debugging must be on.<br><br>"
-            "No adb yet? <b>Download ADB…</b> fetches Google's official platform-tools directly "
-            "from Google (one click, no installation, no admin rights).")
-        adb_label = QLabel("ADB program: ⓘ")
-        for wdg in (adb_label, self.adb_edit):
-            wdg.setToolTip(adb_tip)
-        form.addRow(adb_label, row)
-        self.adb_hint = adb_hint = QLabel()
+        row.addWidget(info_btn)
+        row.addWidget(change)
+        form.addRow("ADB (cable backups):", row)
         self._update_adb_hint()
-        adb_hint.setWordWrap(True)
-        adb_hint.setStyleSheet(f"color:{GRAY}")
-        adb_hint.setToolTip(adb_tip)
-        form.addRow("", adb_hint)
         self.wait_spin = QSpinBox()
         self.wait_spin.setRange(1, 300)
         self.wait_spin.setSuffix(" s")
@@ -1275,6 +1493,7 @@ class MainWindow(QMainWindow):
         save.clicked.connect(self._save_settings)
         form.addRow("", save)
         lab = QLabel(f"Settings file: {config.config_path()}")
+        lab.setWordWrap(True)
         lab.setStyleSheet(f"color:{GRAY}")
         lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("", lab)
@@ -1289,8 +1508,15 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
         self.progress_label = QLabel("Ready.")
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setTextFormat(Qt.RichText)
+        self.progress_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # room for 3 lines (progress, amount/speed, files now) so the panel does not jump
+        self.progress_label.setMinimumHeight(self.progress_label.fontMetrics().lineSpacing() * 3 + 4)
+        self.progress_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
+        self.log.setMinimumHeight(60)
         row = QHBoxLayout()
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setEnabled(False)
@@ -1301,13 +1527,14 @@ class MainWindow(QMainWindow):
         self.folder_btn = QPushButton("Open backup folder")
         self.folder_btn.setEnabled(False)
         self.folder_btn.clicked.connect(lambda: self._open(self.last_folder))
-        row.addWidget(self.progress_label, 1)
         row.addWidget(self.cancel_btn)
         row.addWidget(self.report_btn)
         row.addWidget(self.folder_btn)
+        row.addStretch()
+        lay.setContentsMargins(9, 6, 9, 6)
         lay.addWidget(self.progress)
+        lay.addWidget(self.progress_label)
         lay.addLayout(row)
-        lay.addWidget(self.log, 1)
         return w
 
     # ------------------------------------------------------------------ jobs
@@ -1315,6 +1542,10 @@ class MainWindow(QMainWindow):
         """awake = name of a long job ("Backup", ...): the computer is kept from sleeping meanwhile."""
         if busy:
             self._set_busy(True)
+        if awake:                       # long job: summary + log file at the end
+            self._job = {"name": awake, "t0": time.monotonic(), "started": time.time(),
+                         "log_from": len(self.log.toPlainText().split("\n")) if self.log.toPlainText() else 0}
+            ui.last_transfer = None
         keep = awake is not None and bool(self.cfg.get("keep_awake", True))
         if keep:
             windows_block_shutdown(self.winId(), True)
@@ -1340,7 +1571,15 @@ class MainWindow(QMainWindow):
             self.connecting = False
             last = err.strip().splitlines()[-1]
             self._on_log("error", err)
-            QMessageBox.critical(self, APP_NAME, f"Something went wrong:\n\n{last}")
+            log = self._save_job_log("stopped with an error") if getattr(self, "_job", None) else None
+            box = QMessageBox(QMessageBox.Critical, APP_NAME, f"Something went wrong:\n\n{last}"
+                              + (f"\n\nTime: {self._job_time()}\nLog file: {log}" if log else ""), parent=self)
+            open_btn = box.addButton("Open log file", QMessageBox.AcceptRole) if log else None
+            box.addButton(QMessageBox.Close)
+            box.exec()
+            if open_btn is not None and box.clickedButton() is open_btn:
+                self._open(log)
+            self._job = None
         elif on_done:
             on_done(res)
         if self._close_when_idle and not self.busy:
@@ -1378,6 +1617,24 @@ class MainWindow(QMainWindow):
             return [str(o) for o in options].index(item) if ok else max(0, (default or 1) - 1)
         if kind == "dir":
             return QFileDialog.getExistingDirectory(self, args[0], str(Path.home())) or ""
+        if kind == "install":                 # installing on the phone: always asked, clearly
+            title, text, details = args
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            box = QMessageBox(QMessageBox.Warning, title, text, parent=self)
+            box.setTextFormat(Qt.RichText)
+            d = html.escape(details).replace("\n", "<br>")
+            for head in ("What exactly happens now:", "What the app does:", "What it cannot do:",
+                         "Remove it at any time"):
+                d = d.replace(head, f"<b>{head}</b>")
+            box.setInformativeText(d)
+            yes = box.addButton("Install on the phone", QMessageBox.AcceptRole)
+            no = box.addButton("Not now", QMessageBox.RejectRole)
+            box.setDefaultButton(no)
+            box.setEscapeButton(no)
+            box.exec()
+            return box.clickedButton() is yes
         return None
 
     def _on_request(self, req):
@@ -1397,10 +1654,18 @@ class MainWindow(QMainWindow):
     def _on_progress(self, d):
         tb = d["total_bytes"] or 0
         self.progress.setValue(int(1000 * d["bytes"] / tb) if tb else 1000)
-        self.progress_label.setText(
-            f"{d['files']}/{d['total_files']} files  ·  {ui.human_size(d['bytes'])} of "
-            f"{ui.human_size(tb)}  ·  {ui.human_size(d['speed'])}/s  ·  "
-            f"about {ui.human_duration(d['eta'])} left  ·  {d['current']}")
+        pct = d.get("percent", 100.0 * d["bytes"] / tb if tb else 100.0)
+        to_go = d.get("to_go", d["total_files"] - d["files"])
+        line = (f"<b>{pct:.1f} %</b>  –  {d['files']:,} of {d['total_files']:,} files done, "
+                f"<b>{to_go:,} to go</b><br>"
+                f"{ui.human_size(d['bytes'])} of {ui.human_size(tb)}  ·  "
+                f"<b>{ui.human_size(d['speed'])}/s</b>  ·  about {ui.human_duration(d['eta'])} left")
+        active = d.get("active") or ([d["current"]] if d.get("current") else [])
+        if active:
+            short = [a if len(a) <= 40 else a[:24] + "…" + a[-14:] for a in active[:4]]
+            names = ", ".join(html.escape(a) for a in short) + (" …" if len(active) > 4 else "")
+            line += f"<br><span style='color:{GRAY}'>Now: {names}</span>"
+        self.progress_label.setText(line)
 
     # ------------------------------------------------------------------ phone
     def _set_phone_status(self, text, color):
@@ -1469,7 +1734,7 @@ class MainWindow(QMainWindow):
             when = e.get("when", "").replace("T", " ") or "unknown"
             status = e.get("status", "")
             note = "" if not status or status.startswith("COMPLETED") else f" – {status.lower()}"
-            w.info.setText(f"Last backup {when}{note}")
+            w.info.setText(f"Last backup {when}{note}  ·  Backup: {self._phone_backup_size(key, e)}")
             attached = ()
             if not any(os.path.isdir(d) for d in e["destinations"]):
                 try:
@@ -1478,10 +1743,23 @@ class MainWindow(QMainWindow):
                     attached = ()
             ok, hint = lastbackup.check(e, connected, attached_labels=attached)
             if not connected:
-                hint += (" Fastest: open “Fast Media Backup” on the phone, tap “Allow backup over "
+                hint += (" Fastest: open “My Media Backup” on the phone, tap “Allow backup over "
                          "cable” and plug in the USB cable (Wi-Fi: “Start backup mode” in the app).")
             w.button.setEnabled(ok and not self.busy)
             w.hint.setText(f"<span style='color:{GREEN if ok else GRAY}'>{html.escape(hint)}</span>")
+
+    def _phone_backup_size(self, key, e):
+        """Size of a phone's backup from a connected drive; remembered for when no drive is there."""
+        for d in e.get("destinations", []):
+            t = backup_totals(Path(d) / key) if os.path.isdir(Path(d) / key) else None
+            if t:
+                if [e.get("size_files"), e.get("size_bytes")] != list(t):
+                    e["size_files"], e["size_bytes"] = t
+                    config.save(self.cfg)
+                return describe_totals(t)
+        if e.get("size_files") is not None:
+            return describe_totals((e["size_files"], e["size_bytes"])) + " (drive not connected)"
+        return "size shown when a backup drive is connected"
 
     def _remove_phones(self):
         keys = [k for k, w in self._phone_widgets.items() if w.pick.isChecked()]
@@ -1543,32 +1821,42 @@ class MainWindow(QMainWindow):
 
         def job():
             link, _why = link_over_cable(src, self.cfg)
-            if link or not setup:
+            if not setup:
                 return link
+            # also when the app answered: an OUTDATED app is offered for update (asked first)
             state = src.companion_state()
-            if state == "outdated" and apk is not None:      # own app, already allowed: just update
-                ok, msg = src.install_companion(apk)
-                (ui.ok if ok else ui.warn)("Phone app “Fast Media Backup” updated." if ok else
-                                           f"The phone app could not be updated: {msg}")
-                state = "ready" if ok else state
-            if state not in ("ready", "outdated"):
+            if link and state != "outdated":
+                return link
+            if state != "ready":
                 if apk is None:
                     ui.warn("The phone app is not included in this program.")
                     return None
-                what = ("install the small phone app “Fast Media Backup”" if state == "missing" else
-                        "give the phone app “Fast Media Backup” the right")
-                if not ui.ask_yes_no(
-                        f"Next time you will not need the Developer options: {what} to switch USB "
-                        "debugging on for a backup.\n\nOn the phone you then only open the app and "
-                        "tap “Allow backup over cable”; after the backup this program switches USB "
-                        "debugging off again.\n\nSet it up now?"):
-                    return None
+                # NEVER install or update anything on the phone without asking (user 2026-11-05)
+                phone = f"{src.manufacturer} {src.device_name}".strip() or "the phone"
+                title, text, details = install_question(state, phone, src.serial,
+                                                        getattr(src, "companion_version", ""),
+                                                        os.path.getsize(apk))
+                if not ui.ask_install(title, text, details):
+                    ui.info(f"Nothing installed on {phone} (you chose “Not now”).")
+                    return link                   # an outdated app keeps working as before
+                verb = "Updating" if state == "outdated" else "Installing"
+                ui.info(f"{verb} the phone app “{COMPANION_NAME}” {COMPANION_VERSION} on {phone} "
+                        f"(serial {src.serial}) over the USB cable …")
                 ok, msg = src.install_companion(apk)
                 if not ok:
                     ui.warn(f"The phone app could not be set up: {msg} – Samsung: switch off “Auto "
                             "Blocker”. Xiaomi: switch on “Install via USB” in the Developer options.")
                     return None
-                ui.ok("Phone app “Fast Media Backup” installed – it may switch USB debugging.")
+                ui.ok(f"Phone app “{COMPANION_NAME}” {COMPANION_VERSION} "
+                      f"{'updated' if state == 'outdated' else 'installed'} on {phone} – it may "
+                      "switch USB debugging.")
+                if link is not None:
+                    link.close()                      # the old app was stopped by the update
+                    link = None
+                if state == "outdated":
+                    ui.warn("The update restarted the phone app, so its safety countdown for USB "
+                            "debugging starts anew: on the phone tap “Allow backup over cable” once "
+                            "more (USB debugging stays on), then start the backup.")
             src.control("companion_open")
             for _ in range(10):                       # the app starts its server
                 time.sleep(1)
@@ -1605,7 +1893,8 @@ class MainWindow(QMainWindow):
         Without a phone it also looks every ~10 s for a paired phone with Wireless debugging
         in the same Wi-Fi and connects it.
         """
-        next_wifi = next_app = next_check = next_ble = 0.0
+        next_wifi = next_app = next_check = next_ble = next_cable = 0.0
+        cable_cache = ""
         while not self._stop.is_set():
             now = time.monotonic()
             if isinstance(self.source, CompanionSource) and not self.busy and now >= next_check:
@@ -1650,7 +1939,18 @@ class MainWindow(QMainWindow):
                                 devs = adb_devices(adb)
                     except Exception:  # noqa: BLE001
                         devs = []
-                self.bridge.adb_state.emit((adb, devs))
+                # a phone on the cable WITHOUT USB debugging (e.g. switched off after the last
+                # backup) – only found this way; checked at most every 10 s
+                cable = ""
+                if not any(st in ("device", "unauthorized") and not wireless.is_wireless(s)
+                           for s, st in (devs or [])):
+                    if now >= next_cable:
+                        next_cable = now + 10
+                        cable_cache = adbsetup.detect_usb_phone()
+                    cable = cable_cache
+                else:
+                    cable_cache, next_cable = "", 0.0
+                self.bridge.adb_state.emit((adb, devs, cable))
             self._stop.wait(2)
 
     def _on_companion_found(self, found):
@@ -1697,7 +1997,7 @@ class MainWindow(QMainWindow):
         PhoneAppDialog(self, self.cfg).exec()
 
     def _on_adb_state(self, state):
-        adb, devs = state
+        adb, devs, cable = state
         if self.busy or self.connecting:
             return
         src = self.source
@@ -1740,6 +2040,14 @@ class MainWindow(QMainWindow):
         elif any(st == "unauthorized" for _, st in devs):
             self._set_phone_status("Phone found: unlock it and tap “Allow USB debugging” "
                                    "(tick “Always allow from this computer”).", ORANGE)
+        elif cable:
+            app = bool(self.cfg.get("companion_phones"))
+            self._set_phone_status(
+                f"{cable} is on the USB cable, but USB debugging is off – the computer cannot read "
+                "it yet. " + ("On the phone open “My Media Backup” and tap “Allow backup over "
+                              "cable” (or switch on USB debugging in the Developer options)."
+                              if app else "Switch on USB debugging on the phone – see “Switch on "
+                              "USB debugging (first time)…” in the backup settings."), ORANGE)
         else:
             self._set_phone_status("No phone connected yet. Plug it in (USB debugging on) or switch "
                                    "on Wireless debugging on a paired phone – it is detected "
@@ -1750,7 +2058,7 @@ class MainWindow(QMainWindow):
         adb = find_adb(self.cfg)
         if not adb:
             QMessageBox.warning(self, "Pair over Wi-Fi", "ADB is needed for Wi-Fi backups. "
-                                "Use Settings → Download ADB… first.")
+                                "Use Settings → ADB → Download ADB… first.")
             return
         dlg = WifiPairDialog(self, adb, self.cfg)
         if dlg.exec() and dlg.connected_address:
@@ -1989,8 +2297,25 @@ class MainWindow(QMainWindow):
         for d in dests:
             ok = os.path.isdir(d)
             p = html.escape(str(Path(d) / name))
-            lines.append(p if ok else f"<span style='color:{GRAY}'>{p} (drive not connected – skipped)</span>")
+            plan = self._plan_preview(d, name)
+            lines.append(f"{p}  <span style='color:{GRAY}'>– {html.escape(plan)}</span>" if ok else
+                         f"<span style='color:{GRAY}'>{p} (drive not connected – skipped)</span>")
         self.preview.setText("<b>Files will be saved to:</b><br>" + "<br>".join(lines))
+
+    def _plan_preview(self, base, name):
+        from . import plans
+        set_dir = Path(base) / name
+        have = plans.folder_plan(set_dir)
+        plan = have or plans.plan_of(self.cfg, base)
+        if plan == plans.SIMPLE:
+            return "Simple (one folder, new files are added)"
+        runs = []
+        if have == plans.GFS:
+            cat = Catalog(set_dir)
+            runs = cat.runs()
+            cat.close()
+        mode, _why = gfs.choose(runs)
+        return f"Grandfather-Father-Son – this backup will be: {gfs.ROLE[mode]} ({mode})"
 
     def _mount_selected(self, location_list):
         """Mount ticked drives that are attached but not mounted yet."""
@@ -2199,6 +2524,45 @@ class MainWindow(QMainWindow):
                                    "You can unplug the phone.", GRAY)
         self._finished(status, paths, verdict, "Backup")
         self._fill_export_sources()
+        from . import plans
+        if status == "COMPLETED":                 # Grandfather-Father-Son drives: suggest cleanup
+            name = backup_parent_name(phone, owner)
+            for base in dests:
+                set_dir = Path(base) / name
+                if plans.folder_plan(set_dir) == plans.GFS:
+                    self._cleanup_exports(after_export=True, tparent=set_dir)
+
+    def _job_time(self):
+        j = getattr(self, "_job", None)
+        return ui.human_duration(time.monotonic() - j["t0"]) if j else "–"
+
+    def _job_summary(self):
+        """'Time … · Copied … · Average speed …' of the job that just ended."""
+        parts = [f"Time: {self._job_time()}"]
+        t = ui.last_transfer
+        if t and t["bytes"]:
+            parts.append(f"Copied: {t['files']:,} files, {ui.human_size(t['bytes'])}")
+            parts.append(f"Average speed: {ui.human_size(t['bytes'] / max(t['seconds'], 0.001))}/s")
+        elif t:
+            parts.append("Nothing new to copy")
+        return parts
+
+    def _save_job_log(self, outcome):
+        """The window log of this job as a text file (also when the job stopped with an error)."""
+        from .adbdownload import data_dir
+        j = self._job
+        lines = self.log.toPlainText().split("\n")[j["log_from"]:]
+        d = Path(data_dir()) / "logs"
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            p = d / time.strftime(f"{j['name']} log %Y-%m-%d %H-%M-%S.txt", time.localtime(j["started"]))
+            p.write_text(f"{APP_NAME} – {j['name']} {outcome}\n"
+                         + "\n".join(f"  {x}" for x in self._job_summary()) + "\n\n"
+                         + "\n".join(lines) + "\n", encoding="utf-8")
+            return p
+        except OSError as e:
+            ui.warn(f"Could not write the log file: {e}")
+            return None
 
     def _finished(self, status, paths, verdict, what):
         html_reports = [p for p in paths if str(p).endswith(".html")]
@@ -2207,17 +2571,29 @@ class MainWindow(QMainWindow):
             self.report_btn.setEnabled(True)
         if self.last_folder:
             self.folder_btn.setEnabled(True)
-        self.progress_label.setText(f"{what}: {status}")
+        summary = self._job_summary()
+        self.progress_label.setText(f"{what}: {status}  ·  " + "  ·  ".join(summary))
+        ui.info(f"{what}: " + " · ".join(summary))
+        txt = [p for p in paths if str(p).endswith(".txt")]
+        log = txt[0] if txt else (self._save_job_log(status.lower()) if getattr(self, "_job", None) else None)
+        if log:
+            ui.info(f"Log file (report): {log}")
         good = verdict.startswith(("EVERYTHING", "RESTORE OK"))
         if good:
             self.progress.setValue(1000)
+        text = (f"{verdict}\n\nStatus: {status}\n\n" + "\n".join(summary)
+                + (f"\n\nLog file (report): {log}" if log else ""))
         box = QMessageBox(QMessageBox.Information if good else QMessageBox.Warning,
-                          f"{what} finished", f"{verdict}\n\nStatus: {status}", parent=self)
+                          f"{what} finished", text, parent=self)
         open_btn = box.addButton("Open report", QMessageBox.AcceptRole) if html_reports else None
+        log_btn = box.addButton("Open log file", QMessageBox.ActionRole) if log else None
         box.addButton(QMessageBox.Close)
         box.exec()
+        self._job = None
         if open_btn is not None and box.clickedButton() is open_btn:
             self._open(self.last_report)
+        elif log_btn is not None and box.clickedButton() is log_btn:
+            self._open(log)
 
     @staticmethod
     def _open(path):
@@ -2225,18 +2601,51 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     # ------------------------------------------------------------------ export
-    def _fill_export_sources(self, select=None):
+    def _export_sets(self):
+        """{backup name: [copies]} – backups on the saved drives plus folders chosen with Browse…
+        (Grandfather-Father-Son backups are not exported: they already keep older states.)"""
+        from . import plans
+        sets = {}
+        for name, copies in self._backup_sets().items():
+            simple = [p for p in copies if plans.folder_plan(p) != plans.GFS]
+            if simple:
+                sets[name] = simple
+        for e in self.cfg.get("extra_export_sources", []):
+            if os.path.isdir(e) and e not in sets.get(Path(e).name, []):
+                sets.setdefault(Path(e).name, []).append(e)
+        return sets
+
+    def _fill_export_sources(self, select=None, mount=False):
+        if mount:
+            for m in mount_for_paths(self.cfg.get("destinations", [])):
+                (ui.ok if m.startswith("Mounted") else ui.warn)(m)
+        cur_path = select or self.export_src.currentData()
+        cur_name = Path(cur_path).name if cur_path else self.export_set.currentText()
+        self.export_set.blockSignals(True)
+        self.export_set.clear()
+        for name in sorted(self._export_sets()):
+            self.export_set.addItem(name)
+        idx = self.export_set.findText(cur_name) if cur_name else -1
+        self.export_set.setCurrentIndex(idx if idx >= 0 else 0)
+        self.export_set.blockSignals(False)
+        self._fill_export_copies(select=cur_path)
+
+    def _fill_export_copies(self, select=None):
         cur = select or self.export_src.currentData()
         self.export_src.blockSignals(True)
         self.export_src.clear()
-        items = find_backups(self.cfg)
-        extra = self.cfg.get("extra_export_sources", [])
-        for p in items + [e for e in extra if e not in items and os.path.isdir(e)]:
+        for p in self._export_sets().get(self.export_set.currentText(), []):
             self.export_src.addItem(p, p)
         idx = self.export_src.findData(cur) if cur else -1
         self.export_src.setCurrentIndex(idx if idx >= 0 else 0)
+        self.export_src.setEnabled(self.export_src.count() > 1)
         self.export_src.blockSignals(False)
         self._refresh_export_info()
+
+    def _update_export_size(self):
+        src = self.export_src.currentData()
+        self.export_size.setText(f"Size of the backup: <b>{describe_totals(backup_totals(src))}</b>"
+                                 if src else "")
 
     def _browse_export_src(self):
         p = QFileDialog.getExistingDirectory(self, "Choose the backup folder (Phone - Owner)",
@@ -2260,34 +2669,353 @@ class MainWindow(QMainWindow):
             return src, None, None
         return src, tgt[0], Path(tgt[0]) / Path(src).name
 
+    # ---- cloud storage (Google Drive): a mirror, only new files, nothing deleted
+    def _add_cloud(self, service):
+        if service != "gdrive":
+            return
+        if not gdrive.is_configured(self.cfg):
+            QMessageBox.information(self, "Google Drive", "Google Drive is not set up in this version yet "
+                                    "(the app's Google key is missing).")
+            return
+        if gdrive.signed_in_email():
+            self.export_targets.add_cloud(GDRIVE)
+            self._gdrive_refresh_account()
+            return
+        if QMessageBox.question(
+                self, "Add Google Drive",
+                "The backup is mirrored to Google Drive: same year/month folders in "
+                f"“My Drive/{gdrive.ROOT_NAME}”, each export uploads only new files, and nothing on "
+                "Google Drive is ever deleted or overwritten.\n\nThe app gets access ONLY to the files "
+                "it uploads itself – nothing else in your Google Drive.\n\n"
+                "Sign in with Google in the browser now?") != QMessageBox.Yes:
+            return
+        ui.title("Google Drive sign-in")
+        ui.info("Finish the sign-in in the browser window (Cancel stops waiting).")
+
+        def job():
+            try:
+                return True, gdrive.sign_in(self.cfg, cancel=self.cancel_event)
+            except Cancelled:
+                return False, "Sign-in cancelled."
+            except gdrive.DriveError as e:
+                return False, str(e)
+
+        self.run_job(job, self._gdrive_signed_in)
+
+    def _gdrive_signed_in(self, res):
+        ok, text = res
+        if ok:
+            ui.ok(f"Signed in to Google Drive as {text}.")
+            self.progress_label.setText("Signed in to Google Drive.")
+            self.export_targets.add_cloud(GDRIVE)
+            self._gdrive_runs.clear()          # possibly another Google account
+            self._gdrive_sets = None
+            self._fill_restore_sets()
+        else:
+            ui.warn(text)
+            self.progress_label.setText(text)
+            if text != "Sign-in cancelled.":
+                QMessageBox.warning(self, "Google Drive", text)
+        self._gdrive_refresh_account()
+
+    def _gdrive_refresh_account(self):
+        self.export_targets.update_status()
+        if not (gdrive.is_configured(self.cfg) and gdrive.signed_in_email()
+                and GDRIVE in self.export_targets.paths()):
+            return
+
+        def get():
+            try:
+                return gdrive.Drive(self.cfg).account()
+            except gdrive.DriveError as e:
+                return {"error": str(e)}
+
+        self.run_job(get, self._gdrive_account_done, busy=False)
+
+    def _gdrive_account_done(self, acct):
+        if acct and "error" in acct:
+            ui.warn(f"Google Drive: {acct['error']}")
+        else:
+            self.export_targets.cloud_info[GDRIVE] = acct
+        self.export_targets.update_status()
+        self._refresh_export_info()
+
+    # ---- export type: Google Drive has "Copy (mirror)" in addition to the HDD types
+    def _show_modes(self, cloud):
+        self.mode_buttons["mirror"].setVisible(cloud)
+        key, default = ("gdrive_export_mode", "mirror") if cloud else ("export_mode", "auto")
+        mode = self.cfg.get(key, default)
+        if mode not in self.mode_buttons or (mode == "mirror" and not cloud):
+            mode = default
+        self.mode_buttons[mode].setChecked(True)
+
+    def _mode(self):
+        return [m for m, b in self.mode_buttons.items() if b.isChecked()][0]
+
+    def _load_gdrive_runs(self, name, then=None):
+        """Read the GFS exports of one phone on Google Drive (in the background)."""
+        self._gdrive_runs[name] = "loading"
+
+        def get():
+            try:
+                return gdrive_gfs.runs_of(name, self.cfg)
+            except gdrive.DriveError as e:
+                if "No Grandfather-Father-Son backup" in str(e):
+                    return [], {}
+                return {"error": str(e)}
+
+        def done(res):
+            if isinstance(res, dict):
+                ui.warn(f"Google Drive: {res['error']}")
+                self._gdrive_runs.pop(name, None)
+                return
+            self._gdrive_runs[name] = res
+            self._refresh_export_info()
+            self._refresh_restore_runs()
+            if then:
+                then()
+
+        self.run_job(get, done, busy=False)
+
+    def _refresh_gdrive_export_info(self, src):
+        self.export_mode_group.setVisible(True)
+        self.export_cleanup_btn.setEnabled(False)
+        self.export_runs.clear()
+        mode = self._mode()
+        name = Path(src).name if src else None
+        signed = gdrive.signed_in_email()
+        info, warn = [], []
+        if mode == "mirror":
+            for m in ("differential", "incremental"):
+                self.mode_buttons[m].setEnabled(True)
+            if name:
+                for p in gdrive.last_reports(name):
+                    it = QListWidgetItem(p.stem)
+                    it.setData(Qt.UserRole, str(p))
+                    it.setToolTip("Double-click to open the report")
+                    self.export_runs.addItem(it)
+            info.append(html.escape(f"Google Drive: a copy of the backup in “My Drive/{gdrive.ROOT_NAME}/"
+                                    f"{name or 'Phone - Owner'}” – only files that are not there yet are "
+                                    "uploaded, nothing is deleted or overwritten."))
+        else:
+            info.append(html.escape(
+                f"Google Drive – Grandfather-Father-Son in “My Drive/{gdrive.ROOT_NAME}/"
+                f"{gdrive_gfs.folder_name(name or 'Phone - Owner')}”. Every photo is stored once: new "
+                "files are uploaded, a full or differential export links to files already on Google "
+                "Drive (shortcuts – no extra space, also to the Copy if there is one)."))
+            cached = self._gdrive_runs.get(name) if name else None
+            if name and signed and cached is None:
+                self._load_gdrive_runs(name)
+                cached = "loading"
+            if cached == "loading":
+                info.append("Reading the exports on Google Drive …")
+                for m in ("differential", "incremental"):
+                    self.mode_buttons[m].setEnabled(False)
+            elif cached:
+                runs, sizes = cached
+                act = gfs.active(runs)
+                has_full = any(r.type == "full" and r.status == "COMPLETED" for r in act)
+                for r in reversed(act):
+                    self.export_runs.addItem(f"{r.folder}    {gfs.label(r)}    "
+                                             f"{ui.human_size(sizes.get(r.id, 0))} stored    [{r.status}]")
+                self.export_cleanup_btn.setEnabled(bool(gfs.to_retire(runs)))
+                for m in ("differential", "incremental"):
+                    self.mode_buttons[m].setEnabled(has_full)
+                if not has_full and mode in ("differential", "incremental"):
+                    self.mode_buttons["full"].setChecked(True)
+                    warn.append("There is no full export on Google Drive yet – the first export must "
+                                "be a full one.")
+                if mode == "auto":
+                    m, why = gfs.choose(runs)
+                    info.append(f"This export will be: <b>{gfs.ROLE[m]} – {m}</b> ({html.escape(why)}).")
+        if not src:
+            warn.append("No backup found – connect the backup drive and click “Refresh”, or use “Browse…”.")
+        if not signed:
+            warn.append("Not signed in – click “Add to cloud storage” → Google Drive.")
+        self.export_hint.setText("<br>".join(info + [f"<span style='color:{ORANGE}'>{html.escape(h)}</span>"
+                                                     for h in warn]))
+
+    def _start_gdrive_export(self, src):
+        if not gdrive.signed_in_email():
+            QMessageBox.warning(self, "Cannot start yet", "Sign in to Google Drive first "
+                                "(“Add to cloud storage” → Google Drive).")
+            return
+        self.last_folder = None
+        mode = self._mode()
+        if mode == "mirror":
+            ui.title(f"Google Drive export (copy) of {src}")
+            self.run_job(lambda: gdrive.perform_drive_export(src, self.cfg, cancel=self.cancel_event),
+                         self._gdrive_export_done, awake="Export")
+            return
+        name = Path(src).name
+        if self._gdrive_runs.get(name) == "loading":
+            QMessageBox.information(self, APP_NAME, "Still reading the exports on Google Drive – "
+                                    "please try again in a moment.")
+            return
+        ui.title(f"Google Drive export ({'Grandfather-Father-Son' if mode == 'auto' else mode}) of {src}")
+
+        def done(res):
+            self._gdrive_export_done(res)
+            self._gdrive_runs.pop(name, None)
+            self._gdrive_sets = None
+            after = (lambda: self._cleanup_gdrive(name, after_export=True)) if res[0] == "COMPLETED" else None
+            self._load_gdrive_runs(name, then=after)
+            self._fill_restore_sets()
+
+        self.run_job(lambda: gdrive_gfs.perform_drive_gfs_export(src, self.cfg, mode,
+                                                                 cancel=self.cancel_event),
+                     done, awake="Export")
+
+    def _gdrive_export_done(self, res):
+        status, paths, verdict = res
+        self.folder_btn.setEnabled(False)
+        self._finished(status, paths, verdict, "Google Drive export")
+        self._gdrive_refresh_account()
+
+    def _cleanup_gdrive(self, name, after_export=False):
+        cached = self._gdrive_runs.get(name)
+        if not isinstance(cached, tuple):
+            return
+        runs, sizes = cached
+        retire = gfs.to_retire(runs)
+        if not self._confirm_cleanup(retire, sizes, f"Google Drive: {gdrive_gfs.folder_name(name)}",
+                                     after_export):
+            return
+        ids = [r.id for r in retire]
+        ui.title(f"Clean up Google Drive: {gdrive_gfs.folder_name(name)}")
+
+        def done(res):
+            removed, problems, freed = res
+            self._cleanup_done((removed, problems), freed)
+            self._gdrive_runs.pop(name, None)
+            self._load_gdrive_runs(name)
+            self._gdrive_refresh_account()
+
+        self.run_job(lambda: gdrive_gfs.remove_runs(name, self.cfg, ids), done, awake="Clean up")
+
     def _refresh_export_info(self):
+        self._update_export_size()
+        sel = self.export_targets.selected_paths()
+        if sel and is_cloud(sel[0]):
+            self._show_modes(cloud=True)
+            self._refresh_gdrive_export_info(self.export_src.currentData())
+            return
+        self._show_modes(cloud=False)
+        self.export_mode_group.setVisible(True)
         src, tgt, tparent = self._export_target_parent()
         self.export_runs.clear()
-        has_full = False
+        runs = []
         if tparent and has_catalog(tparent):
             cat = Catalog(tparent)
             runs = cat.runs()
-            has_full = cat.last_full() is not None
             cat.close()
-            for r in reversed(runs):
-                self.export_runs.addItem(f"{r.folder}    [{r.status}]")
+        act = gfs.active(runs)
+        has_full = any(r.type == "full" and r.status == "COMPLETED" for r in act)
+        for r in reversed(act):
+            self.export_runs.addItem(f"{r.folder}    {gfs.label(r)}    [{r.status}]")
+        self.export_cleanup_btn.setEnabled(bool(tparent) and bool(gfs.to_retire(runs)))
         for m in ("differential", "incremental"):
             self.mode_buttons[m].setEnabled(has_full)
-        hints = []
+        hints, info = [], []
         if not src:
-            hints.append("No backup found yet – make a backup first or use “Browse…”.")
+            hints.append("No backup found – connect the backup drive and click “Refresh”, "
+                         "or use “Browse…”.")
         if not tgt:
             hints.append("Choose a connected second storage.")
-        if src and tgt and not has_full:
+        if src and tgt and not has_full and not self.mode_buttons["auto"].isChecked():
             self.mode_buttons["full"].setChecked(True)
             hints.append("There is no full export on this storage yet – the first export must be a full one.")
+        if src and tgt and self.mode_buttons["auto"].isChecked():
+            mode, why = gfs.choose(runs)
+            info.append(f"This export will be: <b>{gfs.ROLE[mode]} – {mode}</b> ({html.escape(why)}).")
         if src and tgt and same_volume(src, tgt):
             hints.append("WARNING: the second storage is on the same drive as the backup – "
                          "this does not protect against a drive failure.")
-        self.export_hint.setText("<br>".join(f"<span style='color:{ORANGE}'>{html.escape(h)}</span>"
-                                             for h in hints))
+        self.export_hint.setText("<br>".join(info + [f"<span style='color:{ORANGE}'>{html.escape(h)}</span>"
+                                                     for h in hints]))
+
+    def _export_mode_clicked(self, _id):
+        mode = self._mode()
+        sel = self.export_targets.selected_paths()
+        self.cfg["gdrive_export_mode" if sel and is_cloud(sel[0]) else "export_mode"] = mode
+        config.save(self.cfg)
+        self._refresh_export_info()
+
+    def _cleanup_exports(self, after_export=False, tparent=None):
+        """GFS cleanup: list the exports the scheme retires, delete only after confirmation.
+        tparent: a Grandfather-Father-Son folder (second storage or backup drive)."""
+        if tparent is None:
+            sel = self.export_targets.selected_paths()
+            if sel and is_cloud(sel[0]):
+                src = self.export_src.currentData()
+                if src:
+                    self._cleanup_gdrive(Path(src).name, after_export)
+                return
+            _src, _tgt, tparent = self._export_target_parent()
+        if not tparent or not has_catalog(tparent):
+            return
+        cat = Catalog(tparent)
+        runs = cat.runs()
+        cat.close()
+        retire = gfs.to_retire(runs)
+        sizes = {r.id: folder_size(Path(tparent) / r.folder) for r in retire}
+        if not self._confirm_cleanup(retire, sizes, str(tparent), after_export):
+            return
+        total = sum(sizes.values())
+        ids = [r.id for r in retire]
+        ui.title(f"Clean up {tparent}")
+        # deleting many GB on a HDD takes a while: in the background, computer kept awake
+        self.run_job(lambda: remove_runs(tparent, ids), lambda res: self._cleanup_done(res, total),
+                     awake="Clean up")
+
+    def _confirm_cleanup(self, retire, sizes, where, after_export):
+        if not retire:
+            if not after_export:
+                QMessageBox.information(self, "Clean up", "Nothing to clean up – every export is still "
+                                        "kept by the Grandfather-Father-Son scheme.")
+            return False
+        total = sum(sizes.get(r.id, 0) for r in retire)
+        k = gfs.KEEP
+        lines = "\n".join(f"  {r.folder}  –  {gfs.label(r)}, {ui.human_size(sizes.get(r.id, 0))}" for r in retire)
+        box = QMessageBox(QMessageBox.Question, "Clean up old exports",
+                          f"The Grandfather-Father-Son scheme keeps the newest {k['full']} full, "
+                          f"{k['differential']} differential and {k['incremental']} incremental exports "
+                          "(and everything they need for a restore).\n\n"
+                          f"In {where}\nthese {len(retire)} older backups are no longer needed "
+                          f"({ui.human_size(total)}):\n\n{lines}\n\n"
+                          "Delete them now? Their states can then no longer be restored. "
+                          "The backup itself is not touched.", parent=self)
+        yes = box.addButton("Delete these exports", QMessageBox.DestructiveRole)
+        box.addButton("Keep them", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not yes:
+            ui.info("Old exports kept.")
+            return False
+        return True
+
+    def _cleanup_done(self, res, total):
+        removed, problems = res
+        for f in removed:
+            ui.ok(f"Removed old backup {f}")
+        for pr in problems:
+            ui.warn(pr)
+        ui.info(f"Clean up: {len(removed)} removed, {ui.human_size(total)} freed.")
+        self.progress_label.setText(f"Clean up: {len(removed)} old backups removed, "
+                                    f"{ui.human_size(total)} freed.")
+        self._job = None
+        self._refresh_export_info()
+        self._fill_restore_sets()
 
     def _start_export(self):
+        sel = self.export_targets.selected_paths()
+        if sel and is_cloud(sel[0]):
+            self._fill_export_sources()
+            src = self.export_src.currentData()
+            if not src:
+                QMessageBox.warning(self, "Cannot start yet", "Choose a backup first.")
+                return
+            self._start_gdrive_export(src)
+            return
         self._mount_selected(self.export_targets)
         self._fill_export_sources()
         src, tgt, tparent = self._export_target_parent()
@@ -2300,7 +3028,7 @@ class MainWindow(QMainWindow):
             return
         mode = [m for m, b in self.mode_buttons.items() if b.isChecked()][0]
         self.last_folder = str(tparent)
-        ui.title(f"Export ({mode}) of {src}")
+        ui.title(f"Export ({'Grandfather-Father-Son' if mode == 'auto' else mode}) of {src}")
         self.run_job(lambda: perform_export(src, tgt, mode, self.cfg, cancel=self.cancel_event),
                      self._export_done, awake="Export")
 
@@ -2309,6 +3037,8 @@ class MainWindow(QMainWindow):
         self._finished(status, paths, verdict, "Export")
         self._refresh_export_info()
         self._fill_restore_sets()
+        if status == "COMPLETED":
+            self._cleanup_exports(after_export=True)
 
     # ------------------------------------------------------------------ restore
     def _fill_restore_sets(self, select=None):
@@ -2319,10 +3049,35 @@ class MainWindow(QMainWindow):
         extra = self.cfg.get("extra_restore_sets", [])
         for p in items + [e for e in extra if e not in items and has_catalog(e)]:
             self.restore_set.addItem(p, p)
+        if gdrive.is_configured(self.cfg) and gdrive.signed_in_email():
+            if self._gdrive_sets is None:
+                self._load_gdrive_sets()
+            for name in self._gdrive_sets or []:
+                self.restore_set.addItem(f"Google Drive: {gdrive_gfs.folder_name(name)}",
+                                         gdrive_gfs.PREFIX + name)
         idx = self.restore_set.findData(cur) if cur else -1
         self.restore_set.setCurrentIndex(idx if idx >= 0 else 0)
         self.restore_set.blockSignals(False)
         self._refresh_restore_runs()
+
+    def _load_gdrive_sets(self):
+        self._gdrive_sets = []                       # loading – not again meanwhile
+
+        def get():
+            try:
+                return gdrive_gfs.list_sets(gdrive.Drive(self.cfg))
+            except gdrive.DriveError as e:
+                return {"error": str(e)}
+
+        def done(res):
+            if isinstance(res, dict):
+                ui.warn(f"Google Drive: {res['error']}")
+                return
+            self._gdrive_sets = res
+            if res:
+                self._fill_restore_sets()
+
+        self.run_job(get, done, busy=False)
 
     def _browse_restore_set(self):
         p = QFileDialog.getExistingDirectory(self, "Choose the export set (Phone - Owner) on the second storage")
@@ -2340,13 +3095,24 @@ class MainWindow(QMainWindow):
     def _refresh_restore_runs(self):
         self.restore_runs.clear()
         p = self.restore_set.currentData()
-        if not p or not has_catalog(p):
+        if p and p.startswith(gdrive_gfs.PREFIX):
+            name = p[len(gdrive_gfs.PREFIX):]
+            cached = self._gdrive_runs.get(name)
+            if cached is None:
+                self._load_gdrive_runs(name)
+            if not isinstance(cached, tuple):
+                self.restore_runs.addItem("Reading the exports on Google Drive …")
+                return
+            runs = cached[0]
+        elif not p or not has_catalog(p):
             return
-        cat = Catalog(p)
-        runs = cat.runs()
-        cat.close()
+        else:
+            cat = Catalog(p)
+            runs = cat.runs()
+            cat.close()
+        runs = gfs.active(runs)
         for r in reversed(runs):
-            it = QListWidgetItem(f"{r.folder}    [{r.status}]")
+            it = QListWidgetItem(f"{r.folder}    {gfs.ROLE.get(r.type, '')}    [{r.status}]")
             it.setData(Qt.UserRole, r.id)
             self.restore_runs.addItem(it)
         if runs:
@@ -2370,8 +3136,16 @@ class MainWindow(QMainWindow):
                 "overwritten. Continue?") != QMessageBox.Yes:
             return
         run_id = it.data(Qt.UserRole)
+        if run_id is None:
+            return
         self.last_folder = dest
         ui.title(f"Restore into {dest}")
+        if tparent.startswith(gdrive_gfs.PREFIX):
+            name = tparent[len(gdrive_gfs.PREFIX):]
+            self.run_job(lambda: gdrive_gfs.perform_restore(name, run_id, dest, self.cfg,
+                                                            cancel=self.cancel_event),
+                         self._restore_done, awake="Restore")
+            return
         self.run_job(lambda: perform_restore(tparent, run_id, dest, self.cfg, cancel=self.cancel_event),
                      self._restore_done, awake="Restore")
 
@@ -2381,11 +3155,51 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ settings / misc
     def _update_adb_hint(self):
-        adb = find_adb({"adb_path": self.adb_edit.text().strip()})
-        found = (f"Found: {adb}" if adb else
-                 "No adb found – click “Download ADB…” (otherwise the slower MTP is used).")
-        self.adb_hint.setText(f"{found}\nLeave empty = found automatically. ADB is about 3× faster than "
-                              "MTP and lets the app check every file on the phone (hover for details).")
+        from .adbdownload import adb_version
+        adb = find_adb({"adb_path": self.adb_custom})
+        if adb:
+            ver = adb_version(adb).replace("Android Debug Bridge version", "version").strip()
+            where = "your own choice" if self.adb_custom and adb == self.adb_custom else "found automatically"
+            self.adb_status.setText(f"<span style='color:{GREEN}'>✓ Ready</span> – {html.escape(ver or 'adb')}"
+                                    f" <span style='color:{GRAY}'>({where})</span>")
+            self.adb_status.setToolTip(adb)
+        else:
+            self.adb_status.setText(f"<span style='color:{ORANGE}'>Not installed</span> – cable backups "
+                                    "then use the slower phone transfer (MTP).")
+            self.adb_status.setToolTip("")
+        self.adb_download_btn.setVisible(not adb)
+
+    def _adb_info(self):
+        QMessageBox.information(self, "What is ADB?", (
+            "<b>ADB (Android Debug Bridge)</b> is Google's free tool for talking to an Android phone "
+            "over the cable.<br><br>"
+            "With ADB the app copies about 3× faster than the normal phone transfer (MTP) and checks "
+            "every file with SHA-256 <i>on the phone</i> before and after copying.<br><br>"
+            "<b>Why is it not built into the app?</b> ADB belongs to Google and its licence does not "
+            "allow other programs to ship it. So the app finds an ADB that is already there (like on "
+            "this computer) or downloads Google's official one for you with one click.<br><br>"
+            "Normally you never need to change anything here."))
+
+    def _adb_auto(self):
+        self.adb_custom = ""
+        self._save_settings()
+
+    def _offer_adb_download(self):
+        """Once, when ADB is missing: offer the download instead of hiding it in the settings."""
+        if find_adb(self.cfg) or self.cfg.get("adb_offer_declined"):
+            return
+        box = QMessageBox(QMessageBox.Question, APP_NAME,
+                          "For fast cable backups the app needs Google's free ADB tool (about 10 MB).\n\n"
+                          "Download it now? Without it, the slower phone transfer (MTP) is used.", parent=self)
+        yes = box.addButton("Download…", QMessageBox.AcceptRole)
+        box.addButton("Not now", QMessageBox.RejectRole)
+        never = box.addButton("Don't ask again", QMessageBox.DestructiveRole)
+        box.exec()
+        if box.clickedButton() is yes:
+            self._download_adb()
+        elif box.clickedButton() is never:
+            self.cfg["adb_offer_declined"] = True
+            config.save(self.cfg)
 
     def _download_adb(self):
         from .adbdownload import LICENSE_URL, download_adb, platform_name
@@ -2413,7 +3227,7 @@ class MainWindow(QMainWindow):
 
     def _adb_downloaded(self, res):
         path, version = res
-        self.adb_edit.setText(path)
+        self.adb_custom = ""             # the downloaded adb is found automatically
         self._save_settings()
         self._update_adb_hint()
         self.progress_label.setText("ADB downloaded")
@@ -2424,15 +3238,16 @@ class MainWindow(QMainWindow):
     def _browse_adb(self):
         p, _ = QFileDialog.getOpenFileName(self, "Choose the adb program")
         if p:
-            self.adb_edit.setText(p)
+            self.adb_custom = p
+            self._save_settings()
 
     def _save_settings(self):
-        self.cfg["adb_path"] = self.adb_edit.text().strip()
+        self.cfg["adb_path"] = self.adb_custom
         self.cfg["adb_wait_seconds"] = self.wait_spin.value()
         self.cfg["fsync"] = self.fsync_check.isChecked()
         self.cfg["keep_awake"] = self.awake_check.isChecked()
         config.save(self.cfg)
-        if hasattr(self, "adb_hint"):
+        if hasattr(self, "adb_status"):
             self._update_adb_hint()
         ui.ok("Settings saved.")
 
@@ -2442,6 +3257,8 @@ class MainWindow(QMainWindow):
             self.import_dest_list.rebuild()
         elif idx == 1:
             self._fill_export_sources()
+            if GDRIVE in self.export_targets.paths() and GDRIVE not in self.export_targets.cloud_info:
+                self._gdrive_refresh_account()          # free space on Google Drive
         elif idx == 2:
             self._fill_restore_sets()
 
@@ -2453,6 +3270,23 @@ class MainWindow(QMainWindow):
         self.import_dest_list.update_status()
         self._update_preview()
         self._update_home()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_backup_columns()
+
+    def _fit_backup_columns(self):
+        """Backup page: two columns when they fit side by side, otherwise one below the other."""
+        cols = getattr(self, "_backup_cols", None)
+        if cols is None:
+            return
+        if not hasattr(self, "_backup_two_cols_width"):
+            cols.setDirection(QBoxLayout.LeftToRight)
+            self._backup_two_cols_width = self._backup_cols_w.minimumSizeHint().width() + 40
+        want = (QBoxLayout.LeftToRight if self.width() >= self._backup_two_cols_width
+                else QBoxLayout.TopToBottom)
+        if cols.direction() != want:
+            cols.setDirection(want)
 
     def closeEvent(self, event):
         if self.busy:

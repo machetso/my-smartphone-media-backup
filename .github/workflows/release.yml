@@ -34,10 +34,10 @@ jobs:
         include:
           - os: ubuntu-22.04          # older glibc = runs on more Linux distributions
             platform: linux-x86_64
-            binary: fast-smartphone-media-backup
+            binary: my-smartphone-media-backup
           - os: windows-latest
             platform: windows-x64
-            binary: Fast-Smartphone-Media-Backup
+            binary: My-Smartphone-Media-Backup
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -62,9 +62,20 @@ jobs:
           echo "code version: $CODE   tag: $TAG"
           test "$CODE" = "$TAG"
 
+      - name: Google Drive key (from the repository secrets, never in git)
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            python tools/set_google_key.py --id "$GOOGLE_CLIENT_ID" --secret "$GOOGLE_CLIENT_SECRET"
+          else
+            echo "::warning::GOOGLE_CLIENT_ID secret missing - Google Drive export will be unavailable"
+          fi
+
       - name: Build program
         run: |
-          EXTRA="--hidden-import segno --collect-submodules bleak"
+          EXTRA="--hidden-import segno --hidden-import phonebackup._gkey --collect-submodules bleak"
           SEP=":"
           if [ "$RUNNER_OS" = "Windows" ]; then
             SEP=";"
@@ -78,7 +89,7 @@ jobs:
       - name: Package
         run: |
           VERSION=$(python -c "import phonebackup; print(phonebackup.__version__)")
-          NAME="fast-smartphone-media-backup-v${VERSION}-${{ matrix.platform }}"
+          NAME="my-smartphone-media-backup-v${VERSION}-${{ matrix.platform }}"
           mkdir -p "pkg/$NAME"
           cp dist/* README.md LICENSE "pkg/$NAME/"
           cd pkg
@@ -125,5 +136,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" pkg/* \
             --draft \
-            --title "Fast Smartphone Media Backup $GITHUB_REF_NAME" \
+            --title "My Smartphone Media Backup $GITHUB_REF_NAME" \
             --notes-file notes.md

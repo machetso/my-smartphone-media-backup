@@ -87,3 +87,52 @@ def open_readonly_lookup(parent):
     finally:
         db.close()
     return out
+
+
+_totals_cache = {}
+
+
+def backup_totals(parent):
+    """(files, bytes) of a backup folder - instant from its index (each stored file once),
+    otherwise by walking the folder. None if the folder is not there. Cached until the index
+    changes."""
+    parent = Path(parent)
+    p = parent / INTERNAL_DIR / "index.sqlite"
+    try:
+        stamp = p.stat().st_mtime_ns
+    except OSError:
+        stamp = None
+    key = str(parent)
+    hit = _totals_cache.get(key)
+    if hit and stamp is not None and hit[0] == stamp:
+        return hit[1]
+    if stamp is not None:
+        try:
+            db = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+            try:
+                n, b = db.execute("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM "
+                                  "(SELECT rel_path, MAX(size) AS size FROM files GROUP BY rel_path)").fetchone()
+            finally:
+                db.close()
+            _totals_cache[key] = (stamp, (int(n), int(b)))
+            return int(n), int(b)
+        except sqlite3.Error:
+            pass
+    if not parent.is_dir():
+        return None
+    import os
+    n = b = 0
+    for dirpath, dirnames, filenames in os.walk(parent):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".phonebackup")]
+        for fn in filenames:
+            try:
+                b += os.stat(os.path.join(dirpath, fn)).st_size
+                n += 1
+            except OSError:
+                pass
+    return n, b
+
+
+def describe_totals(t):
+    from .ui import human_size
+    return f"{t[0]:,} files · {human_size(t[1])}" if t else "size unknown"

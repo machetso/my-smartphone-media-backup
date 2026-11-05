@@ -1,4 +1,4 @@
-# Windows: double-click this file to start Fast Smartphone Media Backup without a console window.
+# Windows: double-click this file to start My Smartphone Media Backup without a console window.
 import os
 import sys
 
