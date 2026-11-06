@@ -13,7 +13,8 @@ import tempfile
 
 _SANDBOX = tempfile.mkdtemp(prefix="phonebackup-tests-")
 for _var, _sub in (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"),
-                   ("APPDATA", "appdata"), ("LOCALAPPDATA", "localappdata"), ("HOME", "home")):
+                   ("APPDATA", "appdata"), ("LOCALAPPDATA", "localappdata"), ("HOME", "home"),
+                   ("USERPROFILE", "home")):          # Windows: Path.home() uses USERPROFILE
     os.makedirs(os.path.join(_SANDBOX, _sub), exist_ok=True)
     os.environ[_var] = os.path.join(_SANDBOX, _sub)
 os.environ["PHONEBACKUP_NO_ADB_OFFER"] = "1"
