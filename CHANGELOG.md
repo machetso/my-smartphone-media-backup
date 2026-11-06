@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Languages (user request 2026-11-06)
+- **7 languages – the same as VideoSpeedControl:** English, Deutsch, Español, Français, Română,
+  עברית (Hebrew, right-to-left) and tlhIngan Hol (Klingon). **Settings → Language** ("System
+  language" = the computer's language if available); the program offers to restart.
+- **Everything is translated:** windows, buttons, messages, the log, the terminal version, the
+  setup page shown on the phone, the sign-in page, and the **reports** (TXT/HTML/CSV).
+  Folder and file names on the drives stay the same in every language (e.g. `01.January-photos`),
+  so a backup made in one language continues in any other.
+- **Phone app "My Media Backup" 0.5.0** in the same languages: follows the phone's language,
+  or choose it in the app (Language). Updated over the cable after the install question.
+- Long translated texts wrap instead of widening the window.
+
 ### Improvements
 - Windows: each release also offers the program file (`My-Smartphone-Media-Backup-v….exe`) on its
   own, not only inside the .zip (added to 0.9.5 by hand).

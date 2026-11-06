@@ -33,7 +33,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import java.util.Locale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +77,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        I18n.load(this)
         refresh()
         if (!hasAccess || !hasNetwork) askAll()
         else if (Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -78,8 +86,12 @@ class MainActivity : ComponentActivity() {
         // "Pair" … only count when this window is fully visible
         window.decorView.filterTouchesWhenObscured = true
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { Screen() }
+            // right-to-left languages (Hebrew) mirror the layout; I18n.choice is state → redraws at once
+            CompositionLocalProvider(LocalLayoutDirection provides
+                if (I18n.current.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+                    Surface(Modifier.fillMaxSize()) { Screen() }
+                }
             }
         }
     }
@@ -95,6 +107,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var waitingPair: Pairing.Pending? = null
+    private var seenPairings = AppState.pairings     // a new pairing closes the pairing card
 
     private fun handle(intent: Intent?) {
         // the computer opened the app over the cable (pairing over USB / setup): start backup mode
@@ -109,7 +122,7 @@ class MainActivity : ComponentActivity() {
             if (data?.scheme == "phonebackup" && data.host == "pair") {
                 setIntent(Intent())
                 pairCode = null
-                usbInfo = "Pairing link refused: the computer must be in your local network."
+                usbInfo = tr("Pairing link refused: the computer must be in your local network.")
             }
             return
         }
@@ -117,7 +130,7 @@ class MainActivity : ComponentActivity() {
         pairCode = p.code
         if (!MediaIndex.hasLocalNetwork(this)) {
             waitingPair = p
-            pairInfo = "Allow access to the local network first (button below)."
+            pairInfo = tr("Allow access to the local network first (button below).")
             return
         }
         startPairing(p)
@@ -125,14 +138,14 @@ class MainActivity : ComponentActivity() {
 
     private fun startPairing(p: Pairing.Pending) {
         waitingPair = null
-        pairInfo = "Connecting to ${p.pcName} …"
+        pairInfo = tr("Connecting to %s …", p.pcName)
         BackupService.start(this)
         thread {
             var tries = 0
             while (BackupService.server?.port.let { it == null || it == 0 } && tries++ < 50) Thread.sleep(100)
             val err = Pairing.announce(this, p, BackupService.server?.port ?: 0)
             runOnUiThread {
-                pairInfo = err ?: "Does “${p.pcName}” show exactly the same code?"
+                pairInfo = err ?: tr("Does “%s” show exactly the same code?", p.pcName)
                 pairReady = err == null
             }
         }
@@ -143,34 +156,34 @@ class MainActivity : ComponentActivity() {
         val running = AppState.running
         @Suppress("UNUSED_VARIABLE") val changed = AppState.pairedChanged
         val computers = Identity.computers(this)
-        if (AppState.status.startsWith("Paired")) pairCode = null
+        if (AppState.pairings != seenPairings) { seenPairings = AppState.pairings; pairCode = null }
 
         Column(
             Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text("My Media Backup", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text("Lets your computer back up the photos and videos of this phone. " +
+            Text(tr("Lets your computer back up the photos and videos of this phone. " +
                 "The app can only READ photos and videos – it cannot delete or change anything. " +
-                "If the computer set it up, it can also switch USB debugging on for a backup over the cable.",
+                "If the computer set it up, it can also switch USB debugging on for a backup over the cable."),
                 style = MaterialTheme.typography.bodyMedium)
 
             if (!hasAccess) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Access to photos and videos needed", fontWeight = FontWeight.SemiBold)
-                        Text("Choose “Allow all” – with “Select photos” only the chosen ones could be backed up.")
-                        Button(onClick = { askAll() }) { Text("Allow access") }
+                        Text(tr("Access to photos and videos needed"), fontWeight = FontWeight.SemiBold)
+                        Text(tr("Choose “Allow all” – with “Select photos” only the chosen ones could be backed up."))
+                        Button(onClick = { askAll() }) { Text(tr("Allow access")) }
                     }
                 }
             }
             if (!hasNetwork) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Access to the local network needed", fontWeight = FontWeight.SemiBold)
-                        Text("Without it the computer cannot reach the phone (Android asks for " +
-                            "“devices in the local network” / “Nearby devices”).")
-                        Button(onClick = { askAll() }) { Text("Allow network access") }
+                        Text(tr("Access to the local network needed"), fontWeight = FontWeight.SemiBold)
+                        Text(tr("Without it the computer cannot reach the phone (Android asks for " +
+                            "“devices in the local network” / “Nearby devices”)."))
+                        Button(onClick = { askAll() }) { Text(tr("Allow network access")) }
                     }
                 }
             }
@@ -178,15 +191,15 @@ class MainActivity : ComponentActivity() {
             CablePairing.pendingName?.let { name ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Pair over the USB cable", fontWeight = FontWeight.SemiBold)
-                        Text("“$name” wants to back up this phone. Only confirm if this phone is " +
+                        Text(tr("Pair over the USB cable"), fontWeight = FontWeight.SemiBold)
+                        Text(tr("“%s” wants to back up this phone. Only confirm if this phone is " +
                             "connected to that computer with a cable right now and the computer " +
-                            "shows exactly this code:")
+                            "shows exactly this code:", name))
                         Text(CablePairing.pendingCode.chunked(3).joinToString(" "), fontSize = 32.sp,
                             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { CablePairing.answer(true) }) { Text("Pair") }
-                            OutlinedButton(onClick = { CablePairing.answer(false) }) { Text("Refuse") }
+                            Button(onClick = { CablePairing.answer(true) }) { Text(tr("Pair")) }
+                            OutlinedButton(onClick = { CablePairing.answer(false) }) { Text(tr("Refuse")) }
                         }
                     }
                 }
@@ -195,26 +208,26 @@ class MainActivity : ComponentActivity() {
             pairCode?.let { code ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Pairing", fontWeight = FontWeight.SemiBold)
+                        Text(tr("Pairing"), fontWeight = FontWeight.SemiBold)
                         Text(code.chunked(3).joinToString(" "), fontSize = 40.sp,
                             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Text(pairInfo)
                         if (pairReady) {
-                            Text("Only tap “Pair” if you started the pairing yourself and the " +
-                                "computer shows exactly this code.", style = MaterialTheme.typography.bodySmall)
+                            Text(tr("Only tap “Pair” if you started the pairing yourself and the " +
+                                "computer shows exactly this code."), style = MaterialTheme.typography.bodySmall)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = {
                                     if (Pairing.confirm()) {
-                                        pairInfo = "Confirmed – now confirm the same code on the computer."
+                                        pairInfo = tr("Confirmed – now confirm the same code on the computer.")
                                         pairReady = false
                                     }
-                                }) { Text("Same code – Pair") }
+                                }) { Text(tr("Same code – Pair")) }
                                 OutlinedButton(onClick = { Pairing.cancel(); pairCode = null; pairReady = false }) {
-                                    Text("Cancel")
+                                    Text(tr("Cancel"))
                                 }
                             }
                         } else {
-                            TextButton(onClick = { Pairing.cancel(); pairCode = null }) { Text("Cancel") }
+                            TextButton(onClick = { Pairing.cancel(); pairCode = null }) { Text(tr("Cancel")) }
                         }
                     }
                 }
@@ -223,19 +236,19 @@ class MainActivity : ComponentActivity() {
             if (canSwitchUsb) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Backup over cable (fastest)", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                        Text("Switches USB debugging on for the backup. Then plug in the USB cable – " +
-                            "the computer switches USB debugging off again when the backup is done.",
+                        Text(tr("Backup over cable (fastest)"), fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                        Text(tr("Switches USB debugging on for the backup. Then plug in the USB cable – " +
+                            "the computer switches USB debugging off again when the backup is done."),
                             style = MaterialTheme.typography.bodyMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
                                 usbInfo = UsbDebug.switchOn(this@MainActivity)
-                                    ?: "USB debugging is on – plug in the cable now."
+                                    ?: tr("USB debugging is on – plug in the cable now.")
                                 BackupService.start(this@MainActivity)     // runs the 5-minute guard
-                            }) { Text("Allow backup over cable") }
+                            }) { Text(tr("Allow backup over cable")) }
                             OutlinedButton(onClick = {
-                                usbInfo = UsbDebug.switchOff(this@MainActivity) ?: "USB debugging is off."
-                            }) { Text("Switch off") }
+                                usbInfo = UsbDebug.switchOff(this@MainActivity) ?: tr("USB debugging is off.")
+                            }) { Text(tr("Switch off")) }
                         }
                         if (usbInfo.isNotEmpty()) Text(usbInfo, style = MaterialTheme.typography.bodySmall)
                         if (UsbDebug.Guard.text.isNotEmpty()) Text(UsbDebug.Guard.text, fontWeight = FontWeight.SemiBold)
@@ -245,41 +258,71 @@ class MainActivity : ComponentActivity() {
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (running) "Backup mode is ON" else "Backup mode is off",
+                    Text(if (running) tr("Backup mode is ON") else tr("Backup mode is off"),
                         fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     if (AppState.status.isNotEmpty()) Text(AppState.status)
                     if (running) {
-                        Text("Phone address: ${Announce.wifiAddress(this@MainActivity)?.hostAddress ?: "no network"}  ·  port ${AppState.port}",
+                        Text(tr("Phone address: %s  ·  port %d",
+                            Announce.wifiAddress(this@MainActivity)?.hostAddress ?: tr("no network"), AppState.port),
                             style = MaterialTheme.typography.bodySmall)
-                        Text("Start the backup on the computer – it asks the phone for each file and copies it; " +
-                            "the phone sends nothing by itself. Backup mode switches off by itself when the " +
-                            "backup is done, or after 5 minutes without use" +
-                            (if (AppState.idleLeft.isNotEmpty()) " (in ${AppState.idleLeft})." else "."),
+                        Text(if (AppState.idleLeft.isNotEmpty())
+                                tr("Start the backup on the computer – it asks the phone for each file and copies it; " +
+                                    "the phone sends nothing by itself. Backup mode switches off by itself when the " +
+                                    "backup is done, or after 5 minutes without use (in %s).", AppState.idleLeft)
+                            else tr("Start the backup on the computer – it asks the phone for each file and copies it; " +
+                                    "the phone sends nothing by itself. Backup mode switches off by itself when the " +
+                                    "backup is done, or after 5 minutes without use."),
                             style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(onClick = { BackupService.stop(this@MainActivity) }) { Text("Switch off") }
+                        OutlinedButton(onClick = { BackupService.stop(this@MainActivity) }) { Text(tr("Switch off")) }
                     } else {
                         Button(enabled = hasAccess && hasNetwork && computers.isNotEmpty(),
-                            onClick = { BackupService.start(this@MainActivity) }) { Text("Start backup mode") }
-                        if (computers.isEmpty()) Text("Not paired yet: on the computer click " +
-                            "“Set up phone app…” and scan the QR code.", style = MaterialTheme.typography.bodySmall)
+                            onClick = { BackupService.start(this@MainActivity) }) { Text(tr("Start backup mode")) }
+                        if (computers.isEmpty()) Text(tr("Not paired yet: on the computer click " +
+                            "“Set up phone app…” and scan the QR code."), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
 
             if (computers.isNotEmpty()) {
-                Text("Paired computers", fontWeight = FontWeight.SemiBold)
+                Text(tr("Paired computers"), fontWeight = FontWeight.SemiBold)
                 computers.forEach { pc ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(pc.name, Modifier.weight(1f))
                         TextButton(onClick = {
                             Identity.removeComputer(this@MainActivity, pc.id)
                             AppState.pairedChanged++
-                        }) { Text("Remove") }
+                        }) { Text(tr("Remove")) }
                     }
                 }
             }
             Spacer(Modifier.padding(8.dp))
-            Text("Version ${BuildConfigInfo.versionName(this@MainActivity)}", style = MaterialTheme.typography.bodySmall)
+            LanguageRow()
+            Text(tr("Version %s", BuildConfigInfo.versionName(this@MainActivity)), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    /** "Language: …" – System (phone language if there is a dictionary, else English) or any dictionary. */
+    @Composable
+    private fun LanguageRow() {
+        var open by remember { mutableStateOf(false) }
+        val phone = Locale.getDefault().getDisplayLanguage(Locale.getDefault()) +
+            if (I18n.phoneLanguage == null) " → English" else ""
+        val choices = listOf(I18n.SYSTEM to tr("System (%s)", phone)) +
+            I18n.languages.map { it.code to (if (it.code == "tlh") "${it.name} (${tr("Klingon")})" else it.name) }
+        val chosen = choices.firstOrNull { it.first == I18n.choice }?.second ?: choices.first().second
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(tr("Language"), style = MaterialTheme.typography.bodySmall)
+            Column {
+                TextButton(onClick = { open = true }) { Text(chosen) }
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    choices.forEach { (code, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            open = false
+                            I18n.choose(this@MainActivity, code)
+                        })
+                    }
+                }
+            }
         }
     }
 }

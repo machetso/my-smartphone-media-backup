@@ -19,6 +19,7 @@ import javax.net.ssl.SSLServerSocket
  * The backup server: TLS (phone certificate, pinned by the computer) + a secret per paired
  * computer. READ ONLY - it can list, hash and send photos/videos and nothing else.
  */
+/** [onEvent]: "DONE", "PAIR_REQUEST", "PAIRED\n<computer name>" or a (translated) status text. */
 class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
     companion object {
         const val PREFERRED_PORT = 47823
@@ -132,7 +133,7 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                     val secret = Identity.addComputer(ctx, pcId, name)
                     Response.json(out, 200, JSONObject().put("secret", secret)
                         .put("phone_id", Identity.phoneId(ctx)).toString(), keep)
-                    onEvent("Paired with $name")
+                    onEvent("PAIRED\n$name")
                 }
                 CablePairing.State.REFUSED -> {
                     CablePairing.take(pcId)
@@ -156,7 +157,7 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                 return false
             }
             Response.json(out, 200, JSONObject().put("secret", pc.second).put("phone_id", Identity.phoneId(ctx)).toString(), keep)
-            onEvent("Paired with ${pc.first}")
+            onEvent("PAIRED\n${pc.first}")
             return keep
         }
         val auth = req.headers["authorization"]?.removePrefix("Bearer ")?.trim()
@@ -214,7 +215,7 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             "POST /list" -> {
                 val arr = jsonBody(req).getJSONArray("folders")
                 val folders = (0 until arr.length()).map { arr.getString(it) }
-                onEvent("Computer ${pc.name} is reading the file list …")
+                onEvent(tr("Computer %s is reading the file list …", pc.name))
                 val res = JSONArray()
                 media.list(folders).forEach {
                     res.put(JSONObject().put("rel", it.rel).put("size", it.size).put("mtime", it.mtime))
@@ -237,7 +238,7 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                     Response.json(out, 404, """{"error":"not found"}""", keep)
                 } else {
                     // the computer asks for every file (pull) - the phone only answers
-                    onEvent("${pc.name} is copying ${item.rel.substringAfterLast('/')}")
+                    onEvent(tr("%s is copying %s", pc.name, item.rel.substringAfterLast('/')))
                     media.open(item).use { Response.stream(out, it, item.size, keep) { lastActivity = System.currentTimeMillis() } }
                 }
             }

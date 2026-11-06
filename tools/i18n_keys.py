@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +36,33 @@ def keys() -> dict[str, list[str]]:
                 out.setdefault(_const(node.args[0]), ["tr"])
             elif name == "trp" and len(node.args) >= 2 and _const(node.args[1]) is not None:
                 out.setdefault(_const(node.args[1]), ["trp", _const(node.args[0]) or ""])
+    for k, v in phone_keys().items():      # the phone app shares the dictionaries
+        out.setdefault(k, v)
+    return out
+
+
+_KT_LIT = r'"((?:[^"\\]|\\.)*)"'
+_KT_CALL = re.compile(r'\b(trp?)\(\s*(' + _KT_LIT + r'(?:\s*\+\s*' + _KT_LIT + r')*)')
+_KT_NEXT = re.compile(r'\s*,\s*(' + _KT_LIT + r'(?:\s*\+\s*' + _KT_LIT + r')*)')
+
+
+def _kt_join(chunk: str) -> str:
+    return "".join(m.group(1) for m in re.finditer(_KT_LIT, chunk)).replace('\\"', '"').replace("\\n", "\n")
+
+
+def phone_keys() -> dict[str, list[str]]:
+    """Texts of the phone app (android/…/*.kt): tr("…") / trp("one", "other", …), "a" + "b" joined."""
+    out: dict[str, list[str]] = {}
+    for f in sorted((ROOT / "android" / "app" / "src" / "main" / "java").rglob("*.kt")):
+        s = f.read_text(encoding="utf-8")
+        for m in _KT_CALL.finditer(s):
+            first = _kt_join(m.group(2))
+            if m.group(1) == "tr":
+                out.setdefault(first, ["tr"])
+            else:
+                n = _KT_NEXT.match(s, m.end())
+                if n:
+                    out.setdefault(_kt_join(n.group(1)), ["trp", first])
     return out
 
 
@@ -51,7 +79,8 @@ def main(argv: list[str]) -> int:
     if "--missing" in argv:
         code = argv[argv.index("--missing") + 1]
         texts = dictionaries()[code]["texts"]
-        print(json.dumps({t: "" for t in k if t not in texts}, ensure_ascii=False, indent=1))
+        print(json.dumps({t: ({"one (English)": v[1], "other": ""} if v[0] == "trp" else "")
+                          for t, v in k.items() if t not in texts}, ensure_ascii=False, indent=1))
         return 0
     print(f"{len(k)} texts")
     for code, d in dictionaries().items():

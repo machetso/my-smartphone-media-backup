@@ -79,9 +79,9 @@ object Pairing {
             c.outputStream.use { it.write(body) }
             val code = c.responseCode
             c.disconnect()
-            if (code == 200) null else "The computer answered $code."
+            if (code == 200) null else tr("The computer answered %d.", code)
         } catch (e: Exception) {
-            "Could not reach the computer (${p.pcAddress}): ${e.message}"
+            tr("Could not reach the computer (%s): %s", p.pcAddress, e.message ?: "")
         }
     }
 

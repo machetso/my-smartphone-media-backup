@@ -58,6 +58,40 @@ CONN_SHORT = {"adb_app": N_("USB cable"), "adb_manual": N_("USB cable"), "wifi_a
               "app_wifi": N_("Wi-Fi via the phone app"), "mtp": N_("USB cable, file transfer (slow)")}
 
 
+class WrapCheck(QWidget):
+    """A check box whose text wraps (long texts in German, French … must not make the window
+    wider). Behaves like a QCheckBox for the calls the window uses; clicking the text toggles."""
+
+    def __init__(self, text):
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.box = QCheckBox()
+        self.label = QLabel(text)
+        self.label.setWordWrap(True)
+        self.label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.label.setContentsMargins(0, 1, 0, 0)
+        self.label.mousePressEvent = lambda _e: self.box.isEnabled() and self.box.toggle()
+        lay.setAlignment(Qt.AlignTop)
+        lay.addWidget(self.box, 0, Qt.AlignTop)
+        lay.addWidget(self.label, 1)
+        self.toggled = self.box.toggled
+
+    def isChecked(self):
+        return self.box.isChecked()
+
+    def setChecked(self, on):
+        self.box.setChecked(on)
+
+    def blockSignals(self, on):
+        return self.box.blockSignals(on)
+
+    def setToolTip(self, tip):
+        super().setToolTip(tip)
+        self.box.setToolTip(tip)
+        self.label.setToolTip(tip)
+
+
 class StatusBanner(QFrame):
     """The connection status, clearly visible (user request 2026-11-06): a coloured stripe, a big
     headline (state · phone · connection) and the details below in normal size."""
@@ -979,7 +1013,7 @@ class MainWindow(QMainWindow):
         self.conn_overview = ConnectionOverview()
         self.conn_overview.setToolTip(tr("The program always uses the fastest connection it finds."))
         phone_box.addWidget(self.conn_overview)
-        self.debug_off_check = QCheckBox(tr("Switch USB debugging / Wireless debugging off on the phone "
+        self.debug_off_check = WrapCheck(tr("Switch USB debugging / Wireless debugging off on the phone "
                                             "after the backup"))
         self.debug_off_check.setChecked(bool(self.cfg.get("debugging_off_after", True)))
         self.debug_off_check.toggled.connect(self._debug_off_changed)
@@ -1053,7 +1087,7 @@ class MainWindow(QMainWindow):
         fl.addLayout(fbtn)
         fbox = QVBoxLayout()
         fbox.addLayout(fl)
-        self.keep_structure_check = QCheckBox(tr("Other folders than Camera: keep the phone's folder "
+        self.keep_structure_check = WrapCheck(tr("Other folders than Camera: keep the phone's folder "
                                                  "structure\n(e.g. Pictures/Screenshots/…) instead of "
                                                  "sorting them into year/month folders"))
         self.keep_structure_check.setToolTip(tr(
@@ -1122,7 +1156,7 @@ class MainWindow(QMainWindow):
             btns.addWidget(b)
         btns.addStretch()
         src.addLayout(btns)
-        self.import_other_check = QCheckBox(tr(
+        self.import_other_check = WrapCheck(tr(
             "Also import other files (documents, audio, …) – they keep their original folder "
             "under year/other/other-files"))
         src.addWidget(self.import_other_check)
@@ -1579,21 +1613,25 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("Use another adb program…"), self._browse_adb)
         menu.addAction(tr("Download the newest ADB from Google…"), self._download_adb)
         change.setMenu(menu)
-        row.addWidget(self.adb_status, 1)
+        # status text above, buttons below: a long (translated) status may wrap freely
         row.addWidget(self.adb_download_btn)
         row.addWidget(info_btn)
         row.addWidget(change)
-        form.addRow(tr("ADB (cable backups):"), row)
+        row.addStretch()
+        adb_box = QVBoxLayout()
+        adb_box.addWidget(self.adb_status)
+        adb_box.addLayout(row)
+        form.addRow(tr("ADB (cable backups):"), adb_box)
         self._update_adb_hint()
         self.wait_spin = QSpinBox()
         self.wait_spin.setRange(1, 300)
         self.wait_spin.setSuffix(tr(" s"))
         self.wait_spin.setValue(int(self.cfg.get("adb_wait_seconds", 20)))
         form.addRow(tr("Wait for the phone (Connect button):"), self.wait_spin)
-        self.fsync_check = QCheckBox(tr("Force data onto the disk before verifying (safer, slightly slower)"))
+        self.fsync_check = WrapCheck(tr("Force data onto the disk before verifying (safer, slightly slower)"))
         self.fsync_check.setChecked(bool(self.cfg.get("fsync", True)))
         form.addRow("", self.fsync_check)
-        self.awake_check = QCheckBox(tr("Keep the computer awake during backup, import, export and restore\n"
+        self.awake_check = WrapCheck(tr("Keep the computer awake during backup, import, export and restore\n"
                                         "(no standby or shutdown while a job runs, the screen stays on; "
                                         "power settings stay unchanged)"))
         self.awake_check.setChecked(bool(self.cfg.get("keep_awake", True)))

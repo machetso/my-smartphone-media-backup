@@ -136,7 +136,7 @@ def plural_category(code: str, n: int) -> str:
     return "one" if n == 1 else "other"
 
 
-_PH = re.compile(r"%(?:(\d+)\$)?([-+ 0#,]*\d*(?:\.\d+)?)([sdfigeExX%])")
+_PH = re.compile(r"%(?:(\d+)\$)?([-+0#,]*\d*(?:\.\d+)?)([sdfigeExX%])")
 
 
 def _format(template: str, args: tuple) -> str:

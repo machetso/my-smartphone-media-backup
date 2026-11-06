@@ -5,6 +5,8 @@ plugins {
 
 android {
     namespace = "io.github.machetso.mediabackup"
+    // interface languages: i18n/<code>.json at the top of the repository (shared with the desktop)
+    sourceSets["main"].assets.srcDir("../../i18n")
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }
@@ -13,8 +15,8 @@ android {
         applicationId = "io.github.machetso.mediabackup"
         minSdk = 30          // Android 11 - same as wireless debugging
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 8
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -38,8 +38,8 @@ from .sources import SourceFile, _dedupe, _run
 
 SERVICE_TYPE = "_phonebkp._tcp"
 APP_PACKAGE = "io.github.machetso.mediabackup"
-APP_VERSION_CODE = 7          # versionCode of the bundled assets/companion/MediaBackup.apk
-APP_VERSION_NAME = "0.4.0"    # its versionName (shown before installing)
+APP_VERSION_CODE = 8          # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_NAME = "0.5.0"    # its versionName (shown before installing)
 APP_NAME = "My Media Backup"
 DEFAULT_PORT = 47823
 SETUP_PORT = 47824

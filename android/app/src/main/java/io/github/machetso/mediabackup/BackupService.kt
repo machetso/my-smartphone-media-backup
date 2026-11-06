@@ -24,6 +24,7 @@ object AppState {
     var port by mutableStateOf(0)
     var status by mutableStateOf("")
     var pairedChanged by mutableStateOf(0)
+    var pairings by mutableStateOf(0)        // +1 for every new pairing (closes the pairing card)
     var idleLeft by mutableStateOf("")       // "4:12" until backup mode switches off unused
 }
 
@@ -52,6 +53,7 @@ class BackupService : Service() {
     }
 
     private var wake: PowerManager.WakeLock? = null
+    private var finished = false               // the computer said the backup is done
     private var wifiLock: WifiManager.WifiLock? = null
     private val main = Handler(Looper.getMainLooper())
     private val idleCheck = object : Runnable {
@@ -81,9 +83,10 @@ class BackupService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        I18n.load(this)                      // notification texts (also without the activity)
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Backup mode", NotificationManager.IMPORTANCE_LOW))
-        val n = notification("Waiting for the computer – photos and videos are shared read-only.")
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, tr("Backup mode"), NotificationManager.IMPORTANCE_LOW))
+        val n = notification(tr("Waiting for the computer – photos and videos are shared read-only."))
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -99,14 +102,14 @@ class BackupService : Service() {
         try {
             srv.start()
         } catch (e: Exception) {
-            AppState.status = "Could not start: ${e.message}"
+            AppState.status = tr("Could not start: %s", e.message ?: "")
             stopSelf()
             return
         }
         server = srv
         AppState.running = true
         AppState.port = srv.port
-        AppState.status = "Waiting for the computer …"
+        AppState.status = tr("Waiting for the computer …")
         Announce.refresh(this, srv.port)
         main.postDelayed(idleCheck, 5_000)
         main.postDelayed(tick, 1000)
@@ -114,20 +117,26 @@ class BackupService : Service() {
 
     private fun onServerEvent(ev: String) {
         if (ev == "DONE") {
-            AppState.status = "Backup finished – backup mode switched off."
+            finished = true
+            AppState.status = tr("Backup finished – backup mode switched off.")
             stopSelf()
             return
         }
         if (ev == "PAIR_REQUEST") {
-            val t = "${CablePairing.pendingName ?: "A computer"} wants to pair over the USB cable – open the app to confirm."
+            val t = tr("%s wants to pair over the USB cable – open the app to confirm.", CablePairing.pendingName ?: tr("A computer"))
             AppState.status = t
             notify(t)
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
-        if (ev.startsWith("Paired")) {
+        if (ev.startsWith("PAIRED\n")) {
             AppState.pairedChanged++
+            AppState.pairings++
             Announce.stop(this)                    // announce the new computer's token too
+            val t = tr("Paired with %s", ev.substringAfter('\n'))
+            AppState.status = t
+            notify(t)
+            return
         }
         AppState.status = ev
         notify(ev)
@@ -141,7 +150,7 @@ class BackupService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Backup mode on")
+            .setContentTitle(tr("Backup mode on"))
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
@@ -158,7 +167,7 @@ class BackupService : Service() {
         runCatching { if (wake?.isHeld == true) wake?.release() }
         AppState.running = false
         AppState.port = 0
-        if (!AppState.status.startsWith("Backup finished")) AppState.status = "Backup mode is off."
+        if (!finished) AppState.status = tr("Backup mode is off.")
         super.onDestroy()
     }
 }

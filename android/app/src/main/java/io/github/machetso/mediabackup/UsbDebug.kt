@@ -45,7 +45,7 @@ object UsbDebug {
 
     /** Developer options + USB debugging on. Returns an error text or null. */
     fun switchOn(context: Context): String? {
-        if (!canSwitch(context)) return "Not allowed yet – connect the phone once with USB debugging switched on by hand."
+        if (!canSwitch(context)) return tr("Not allowed yet – connect the phone once with USB debugging switched on by hand.")
         put(context, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 1)
         put(context, Settings.Global.ADB_ENABLED, 1)
         Guard.markSwitchedOn(context, true)
@@ -55,7 +55,7 @@ object UsbDebug {
 
     /** USB debugging and Wireless debugging off (the Developer options stay). */
     fun switchOff(context: Context): String? {
-        if (!canSwitch(context)) return "Not allowed."
+        if (!canSwitch(context)) return tr("Not allowed.")
         put(context, "adb_wifi_enabled", 0)
         put(context, Settings.Global.ADB_ENABLED, 0)
         Guard.markSwitchedOn(context, false)
@@ -150,18 +150,18 @@ object UsbDebug {
                 val left = startDeadline - now
                 if (left <= 0) {
                     switchOff(context)
-                    return "No backup started within 5 minutes – USB debugging switched off."
+                    return tr("No backup started within 5 minutes – USB debugging switched off.")
                 }
-                text = "USB debugging switches off in %d:%02d if no backup starts.".format(left / 60_000, left / 1000 % 60)
+                text = tr("USB debugging switches off in %d:%02d if no backup starts.", left / 60_000, left / 1000 % 60)
             } else if (lastAlive != 0L) {
                 if (now - lastAlive > ALIVE_MS) {
                     val wifi = channel == "wifi"
                     switchOff(context)
-                    return if (wifi) "Connection to the computer lost."
-                    else "Connection to the computer lost – USB debugging switched off."
+                    return if (wifi) tr("Connection to the computer lost.")
+                    else tr("Connection to the computer lost – USB debugging switched off.")
                 }
-                text = if (channel == "wifi") "Backup over Wi-Fi running."
-                else "Backup running – USB debugging switches off when it is done."
+                text = if (channel == "wifi") tr("Backup over Wi-Fi running.")
+                else tr("Backup running – USB debugging switches off when it is done.")
             } else {
                 text = ""
             }
@@ -177,6 +177,7 @@ object UsbDebug {
  */
 class GuardReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        I18n.load(context)                  // texts of the guard (no activity here)
         val g = UsbDebug.Guard
         g.restore(context)
         if (!g.engaged) return
