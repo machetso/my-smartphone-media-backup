@@ -95,6 +95,8 @@ jobs:
           cd pkg
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a -tzip "$NAME.zip" "$NAME" > /dev/null
+            # the program on its own as well (GitHub only shows ".zip" – user request 2026-11-06)
+            cp "$NAME/${{ matrix.binary }}.exe" "${{ matrix.binary }}-v${VERSION}-${{ matrix.platform }}.exe"
           else
             chmod +x "$NAME/${{ matrix.binary }}"
             tar -czf "$NAME.tar.gz" "$NAME"

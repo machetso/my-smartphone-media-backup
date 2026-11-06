@@ -9,6 +9,8 @@ version needs no extra packages.
 
 Ready-to-run programs for Linux and Windows are on the
 [Releases page](../../releases) - no Python installation needed.
+Windows: download `My-Smartphone-Media-Backup-v….exe` and double-click it (or the `.zip` with
+README and license); Linux: the `.tar.gz`.
 See [CHANGELOG.md](CHANGELOG.md) for what is new.
 
 ## Start from source

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Improvements
+- Windows: each release also offers the program file (`My-Smartphone-Media-Backup-v….exe`) on its
+  own, not only inside the .zip (added to 0.9.5 by hand).
+
 ## [0.9.5] - 2026-11-06
 
 Security update after a full code review – **please update** (the phone app is updated to 0.4.0
