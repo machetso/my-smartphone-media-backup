@@ -232,7 +232,9 @@ If ADB doesn't work, the program shows a clear warning and switches to the **MTP
 
 **Set up phone app…** shows a QR code. Scan it with the phone camera: the page (served by this
 computer) offers **1. Download the app** (open the file, tap *Install*) and **2. Connect app**.
-Phone and computer show the same 6-digit code - confirm it on the computer. Done once.
+Phone and computer show the same 6-digit code - confirm it **on the phone and on the computer**
+(the phone hands out its key only after your tap there). Done once. Pairing over the USB cable
+works the same way: both screens show a code, tap *Pair* on the phone only if they match.
 
 Over the cable the program can also install the app itself – it always **asks first** and
 explains which phone, which version, why and exactly what happens; nothing is installed without

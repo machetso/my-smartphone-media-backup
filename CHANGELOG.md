@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.5] - 2026-11-06
+
+Security update after a full code review – **please update** (the phone app is updated to 0.4.0
+over the cable; the program asks first). Existing backups, settings and pairings stay valid.
 
 ### Improvements
 - **Connection status clearly visible** on the start screen and in the backup settings: a coloured
@@ -33,6 +36,12 @@
 - Export never overwrites a file in a new export folder (names that differ only in case) and an
   error with one file no longer leaves the export unfinished without a report.
 - Release build: write rights only for the release step; GitHub actions pinned to fixed versions.
+
+### Tested
+- Pixel 10 Pro: phone app update 0.3.x → 0.4.0 over the cable (install question), a forged pairing
+  link and a key request through the phone's loopback were refused, cable backup without errors.
+- 114 automatic tests, 16 of them for the security fixes; the tests now run in a sandbox and can
+  no longer touch the real settings.
 
 ## [0.9.4] - 2026-11-05
 
