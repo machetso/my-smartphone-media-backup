@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.6] - 2026-11-06
 
 ### Languages (user request 2026-11-06)
 - **7 languages – the same as VideoSpeedControl:** English, Deutsch, Español, Français, Română,
