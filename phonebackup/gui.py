@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QBoxLayout, QButtonGroup, QCheckBox, QComboBox,
+from PySide6.QtWidgets import (QAbstractItemView, QFrame, QApplication, QBoxLayout, QButtonGroup, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
@@ -50,6 +50,43 @@ PHONE_FOLDER_ROOTS = ["DCIM", "Pictures", "Movies", "Download",
 CAMERA_FOLDER = "DCIM/Camera"       # Android's standard camera folder (almost every phone)
 
 GREEN, ORANGE, RED, GRAY = "#1f8a4c", "#c76a00", "#c62828", "#808080"
+
+
+# short names of the connection in use, for the status headline
+CONN_SHORT = {"adb_app": "USB cable", "adb_manual": "USB cable", "wifi_adb": "Wi-Fi debugging",
+              "app_wifi": "Wi-Fi via the phone app", "mtp": "USB cable, file transfer (slow)"}
+
+
+class StatusBanner(QFrame):
+    """The connection status, clearly visible (user request 2026-11-06): a coloured stripe, a big
+    headline (state · phone · connection) and the details below in normal size."""
+
+    SYMBOL = {GREEN: "●", ORANGE: "▲", RED: "✕", GRAY: "○"}
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("statusBanner")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(3)
+        self.head = QLabel()
+        self.head.setWordWrap(True)
+        self.head.setTextFormat(Qt.RichText)
+        self.detail = QLabel()
+        self.detail.setWordWrap(True)
+        self.detail.setTextFormat(Qt.RichText)
+        self.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.head)
+        lay.addWidget(self.detail)
+
+    def show_status(self, headline, detail, color):
+        r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+        self.setStyleSheet(f"#statusBanner{{border-left:6px solid {color};border-radius:6px;"
+                           f"background:rgba({r},{g},{b},0.12)}}")
+        self.head.setText(f"<span style='color:{color};font-size:18px;font-weight:700'>"
+                          f"{self.SYMBOL.get(color, '●')}&nbsp; {html.escape(headline)}</span>")
+        self.detail.setText(html.escape(detail))
+        self.detail.setVisible(bool(detail))
 
 
 DESKTOP_ID = "my-smartphone-media-backup"   # matches the .desktop file / icon name on Linux
@@ -803,9 +840,7 @@ class MainWindow(QMainWindow):
         name = QLabel(APP_NAME)
         name.setStyleSheet("font-size:22px;font-weight:700")
         lay.addWidget(name)
-        self.home_status = QLabel()
-        self.home_status.setWordWrap(True)
-        self.home_status.setTextFormat(Qt.RichText)
+        self.home_status = StatusBanner()
         lay.addWidget(self.home_status)
         lay.addSpacing(8)
 
@@ -899,9 +934,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(_group("Who and which phone", form))
 
         phone_box = QVBoxLayout()
-        self.phone_status = QLabel()
-        self.phone_status.setWordWrap(True)
-        self.phone_status.setTextFormat(Qt.RichText)
+        self.phone_status = StatusBanner()
         phone_box.addWidget(self.phone_status)
         self.conn_overview = ConnectionOverview()
         self.conn_overview.setToolTip("The program always uses the fastest connection it finds.")
@@ -1668,10 +1701,22 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(line)
 
     # ------------------------------------------------------------------ phone
+    def _status_headline(self, color):
+        src = self.source
+        if src is not None and color in (GREEN, ORANGE):
+            phone = f"{getattr(src, 'manufacturer', '')} {src.device_name or ''}".strip() or "Phone"
+            conn = CONN_SHORT.get(adbsetup.source_key(src), getattr(src, "kind", ""))
+            verified = " · verified" if getattr(src, "link", None) is not None or isinstance(
+                src, CompanionSource) else ""
+            return f"Connected: {phone} · {conn}{verified}"
+        return {ORANGE: "Action needed", RED: "Not connected"}.get(color, "No phone connected")
+
     def _set_phone_status(self, text, color):
-        t = f"<span style='color:{color};font-weight:600'>{html.escape(text)}</span>"
-        self.phone_status.setText(t)
-        self.home_status.setText(t)
+        head = self._status_headline(color)
+        if color == GRAY and text.rstrip(" .…").endswith(("connecting", "Connecting", "Looking for a phone")):
+            head = "Searching for the phone …"
+        self.phone_status.show_status(head, text, color)
+        self.home_status.show_status(head, text, color)
         self._update_home()
 
     # ------------------------------------------------------------------ start screen

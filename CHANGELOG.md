@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Improvements
+- **Connection status clearly visible** on the start screen and in the backup settings: a coloured
+  banner with a big headline – e.g. "● Connected: Google Pixel 10 Pro · USB cable · verified",
+  "▲ Action needed", "○ No phone connected" – and the details below as before.
+- Settings are copied once a day (last 7 days) to `~/.config/phonebackup/backups`.
+
 ### Security (review 2026-11-06)
 - **Pairing must now also be confirmed on the phone** (phone app 0.4.0). Before, any app on the
   phone or a tapped web link could pair itself with the phone app and read the photos and
