@@ -199,6 +199,16 @@ class PrivateFilesTest(unittest.TestCase):
             self.assertEqual(json.loads(p.read_text()), {"a": 1})
 
 
+class SettingsCopyTest(unittest.TestCase):
+    def test_daily_copy_before_overwrite(self):
+        p = config.config_path()
+        config.save({"destinations": ["/media/x"]})
+        config.save({})                                    # e.g. something wipes the settings
+        copies = sorted((p.parent / "backups").glob("config-*.json"))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(json.loads(copies[0].read_text())["destinations"], ["/media/x"])
+
+
 class SetupServerTest(unittest.TestCase):
     def setUp(self):
         from phonebackup import companion

@@ -64,5 +64,28 @@ def write_private(p: Path, text: str) -> None:
     os.replace(tmp, p)
 
 
+KEEP_DAILY = 7       # daily copies of the settings kept in the "backups" folder next to them
+
+
+def _keep_copy(p: Path) -> None:
+    """Before the settings are replaced: one copy per day (the last KEEP_DAILY days), so a
+    damaged or wiped settings file can always be restored (incident 2026-11-06)."""
+    import time
+    try:
+        if not p.is_file() or p.stat().st_size == 0:
+            return
+        d = p.parent / "backups"
+        d.mkdir(mode=0o700, exist_ok=True)
+        today = d / f"config-{time.strftime('%Y-%m-%d')}.json"
+        if not today.exists():
+            write_private(today, p.read_text(encoding="utf-8"))
+        for old in sorted(d.glob("config-*.json"))[:-KEEP_DAILY]:
+            old.unlink()
+    except OSError:
+        pass                     # never stop saving because the copy failed
+
+
 def save(cfg: dict) -> None:
-    write_private(config_path(), json.dumps(cfg, indent=2, ensure_ascii=False))
+    p = config_path()
+    _keep_copy(p)
+    write_private(p, json.dumps(cfg, indent=2, ensure_ascii=False))
