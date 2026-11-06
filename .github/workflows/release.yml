@@ -83,7 +83,7 @@ jobs:
           fi
           python -m PyInstaller --noconfirm --clean --onefile --windowed \
             --name "${{ matrix.binary }}" --exclude-module tkinter $EXTRA \
-            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" --add-data "assets/companion/MediaBackup.apk${SEP}assets/companion" \
+            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" --add-data "assets/companion/MediaBackup.apk${SEP}assets/companion" --add-data "i18n${SEP}i18n" \
             smartphone_media_backup.py
 
       - name: Package

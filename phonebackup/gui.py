@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QApplication, QBoxLayo
                                QSplitter, QStackedWidget, QStyle, QTabWidget, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from . import APP_NAME, __version__, config, ui
+from . import APP_NAME, __version__, config, i18n, ui
+from .i18n import N_, tr, trp  # noqa: F401 - used throughout
 from .keepawake import KeepAwake, windows_block_shutdown
 from .backup import backup_parent_name, perform_backup
 from .export import Catalog, folder_size, has_catalog, perform_export, perform_restore, remove_runs
@@ -1478,9 +1479,37 @@ class MainWindow(QMainWindow):
         self._fill_restore_sets()
         return w
 
+    def _choose_language(self, code):
+        if not code or code == i18n.stored_choice(self.cfg):
+            return
+        i18n.store_choice(self.cfg, code)
+        new, old = i18n.resolve(code), i18n.current()
+        i18n.use(code)                      # ask in the language just picked
+        title, text = tr("Language"), tr("The program shows %s after a restart. Restart now?", new.name)
+        yes, no = tr("Restart now"), tr("Later")
+        i18n.use(old.code)
+        box = QMessageBox(QMessageBox.Question, title, text, parent=self)
+        restart = box.addButton(yes, QMessageBox.AcceptRole)
+        box.addButton(no, QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is restart and not self.busy and self.close():
+            from PySide6.QtCore import QProcess
+            args = sys.argv[1:] if getattr(sys, "frozen", False) else [os.path.abspath(sys.argv[0]), *sys.argv[1:]]
+            QProcess.startDetached(sys.executable, args)
+
     def _build_settings_tab(self):
         w = QWidget()
         form = QFormLayout(w)
+        # Language (user request 2026-11-06): the same languages as VideoSpeedControl
+        self.lang_combo = QComboBox()
+        stored = i18n.stored_choice(self.cfg)
+        self.lang_combo.addItem(tr("System language (%s)", i18n.resolve(i18n.SYSTEM).name), i18n.SYSTEM)
+        for lang in i18n.languages():
+            self.lang_combo.addItem(lang.name, lang.code)
+        idx = self.lang_combo.findData(stored)
+        self.lang_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.lang_combo.currentIndexChanged.connect(lambda _i: self._choose_language(self.lang_combo.currentData()))
+        form.addRow(tr("Language:"), self.lang_combo)
         # ADB: one status line; details behind ⓘ, rarely needed choices behind "Change…"
         self.adb_custom = self.cfg.get("adb_path", "")
         row = QHBoxLayout()
