@@ -19,6 +19,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from .i18n import tr
 from .sources import _run
 
 PAIRING = "_adb-tls-pairing._tcp"
@@ -113,17 +114,17 @@ def pair(adb, address, code):
     """Returns (ok, message)."""
     code = code.strip().replace(" ", "")
     if not valid_address(address):
-        return False, "The address must look like 192.168.1.23:41234 (IP address and port)."
+        return False, tr("The address must look like %s (IP address and port).", "192.168.1.23:41234")
     if not code:
-        return False, "The pairing code is missing."
+        return False, tr("The pairing code is missing.")
     try:
         r = _run([adb, "pair", address.strip(), code], timeout=40)
     except (OSError, subprocess.SubprocessError) as e:
-        return False, f"adb pair failed: {e}"
+        return False, tr("%s failed: %s", "adb pair", e)
     out = (r.stdout + r.stderr).decode("utf-8", "replace").strip()
     if "Successfully paired" in out:
         return True, out
-    return False, out or f"adb pair ended with code {r.returncode}"
+    return False, out or tr("%s ended with code %d", "adb pair", r.returncode)
 
 
 def connect(adb, address):
@@ -131,7 +132,7 @@ def connect(adb, address):
     try:
         r = _run([adb, "connect", address.strip()], timeout=15)
     except (OSError, subprocess.SubprocessError) as e:
-        return False, f"adb connect failed: {e}"
+        return False, tr("%s failed: %s", "adb connect", e)
     out = (r.stdout + r.stderr).decode("utf-8", "replace").strip()
     low = out.lower()
     return ("connected to" in low and "failed" not in low and "cannot" not in low), out
@@ -275,12 +276,13 @@ def start_hotspot(ssid, password):
     rejoins the same network automatically next time.
     """
     if sys.platform.startswith("win"):
-        return False, "On Windows switch on 'Mobile hotspot' in the settings."
+        return False, tr("On Windows switch on 'Mobile hotspot' in the settings.")
     if not shutil.which("nmcli"):
-        return False, "NetworkManager (nmcli) was not found - start a hotspot in the system settings."
+        return False, tr("NetworkManager (nmcli) was not found - start a hotspot in the system "
+                         "settings.")
     dev = wifi_interface()
     if not dev:
-        return False, "No Wi-Fi adapter found."
+        return False, tr("No Wi-Fi adapter found.")
     msg = ""
     for band in (["band", "a"], []):
         try:
@@ -289,12 +291,13 @@ def start_hotspot(ssid, password):
         except (OSError, subprocess.SubprocessError) as e:
             code, msg = 1, str(e)
         if code == 0:
-            return True, ("5 GHz" if band else "Wi-Fi") + f" hotspot '{ssid}' is on ({dev})."
+            return True, (tr("5 GHz hotspot '%s' is on (%s).", ssid, dev) if band
+                          else tr("Wi-Fi hotspot '%s' is on (%s).", ssid, dev))
         try:      # remove the half-made 5 GHz profile before trying without band
             _nmcli(["connection", "delete", HOTSPOT_CON], timeout=15)
         except (OSError, subprocess.SubprocessError):
             pass
-    return False, msg or "The hotspot could not be started."
+    return False, msg or tr("The hotspot could not be started.")
 
 
 def stop_hotspot():

@@ -8,15 +8,18 @@ import re
 import struct
 from datetime import datetime
 
+from .i18n import N_
+
 PHOTO_EXT = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".webp", ".gif", ".avif", ".tif", ".tiff", ".bmp"}
 RAW_EXT = {".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".raf", ".orf",
            ".rw2", ".pef", ".srw", ".x3f", ".3fr", ".erf", ".kdc", ".mrw", ".raw", ".rwl", ".iiq"}
 VIDEO_EXT = {".mp4", ".mov", ".3gp", ".3g2", ".mkv", ".webm", ".m4v", ".avi", ".mts", ".m2ts",
              ".mpg", ".mpeg", ".wmv", ".flv", ".vob", ".mod", ".tod", ".asf"}
 
-CATEGORY_LABEL = {"photo": "Photos", "video": "Videos", "raw": "RAW",
-                  "other-photo": "Other pictures", "other-video": "Other movies",
-                  "other-file": "Other files"}
+# English names (shown with tr(CATEGORY_LABEL[c]) – folder names come from layout.py, never from here)
+CATEGORY_LABEL = {"photo": N_("Photos"), "video": N_("Videos"), "raw": N_("RAW"),
+                  "other-photo": N_("Other pictures"), "other-video": N_("Other movies"),
+                  "other-file": N_("Other files")}
 
 
 def category_for(name):
@@ -258,15 +261,15 @@ def detect_date(local_path, name, source_mtime):
     except (OSError, struct.error, ValueError):
         dt = None
     if dt:
-        return dt, "metadata"
+        return dt, N_("metadata")
     dt = filename_datetime(name)
     if dt:
-        return dt, "filename"
+        return dt, N_("filename")
     if source_mtime:
         try:
             dt = datetime.fromtimestamp(source_mtime)
             if _plausible(dt):
-                return dt, "file date"
+                return dt, N_("file date")
         except (OverflowError, OSError, ValueError):
             pass
-    return datetime.now(), "unknown (backup date used)"
+    return datetime.now(), N_("unknown (backup date used)")

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from . import phoneguard, ui
+from .i18n import tr, N_
 from .copier import CHUNK, file_chunks, sha256_file
 
 PHONE_ROOT = "/sdcard"
@@ -112,12 +113,13 @@ class AdbSource:
 
     @property
     def kind(self):
-        return "ADB over Wi-Fi" if self.wireless else "ADB"
+        # kind stays English (compared in code: phoneid, …); show it with tr(src.kind)
+        return N_("ADB over Wi-Fi") if self.wireless else "ADB"
 
     @property
     def description(self):
-        how = "Wi-Fi (wireless debugging)" if self.wireless else "USB debugging"
-        return f"ADB ({how}), serial {self.serial}, Android {self.android}"
+        how = tr("Wi-Fi (wireless debugging)") if self.wireless else tr("USB debugging")
+        return tr("ADB (%s), serial %s, Android %s", how, self.serial, self.android)
 
     def shell(self, cmd, timeout=120):
         phoneguard.check(cmd)       # read-only commands only, paths inside /sdcard
@@ -154,11 +156,11 @@ class AdbSource:
         r = _run([self.adb, "-s", self.serial, "install", "-r", str(apk)], timeout=180)
         out = (r.stdout + r.stderr).decode("utf-8", "replace")
         if r.returncode != 0 or "Success" not in out:
-            return False, out.strip().splitlines()[-1] if out.strip() else "install failed"
+            return False, out.strip().splitlines()[-1] if out.strip() else tr("install failed")
         rc, out = self.control("companion_grant")
         if rc != 0:
-            return False, out.strip() or "permission could not be granted"
-        return True, "installed"
+            return False, out.strip() or tr("permission could not be granted")
+        return True, tr("installed")
 
     def forward(self, remote_port):
         """adb forward tcp:<free local port> → the phone app's server. Returns the local port or None."""
@@ -367,13 +369,14 @@ def connect_adb(cfg):
     """Return (AdbSource, None) or (None, reason why ADB did not work)."""
     adb = find_adb(cfg)
     if not adb:
-        return None, "the 'adb' program was not found (install Android platform-tools, see README)"
+        return None, tr("the '%s' program was not found (install Android platform-tools, see README)",
+                        "adb")
     try:
         _run([adb, "start-server"], timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
-        return None, f"could not start adb: {e}"
+        return None, tr("could not start %s: %s", "adb", e)
     wait = max(1, int(cfg.get("adb_wait_seconds", 20)))
-    ui.info(f"Looking for the phone via ADB (up to {wait} s) - connect it now if not done yet ...")
+    ui.info(tr("Looking for the phone via ADB (up to %d s) - connect it now if not done yet ...", wait))
     from .wireless import auto_connect, remember, usb_first
     try:
         no_phone = not any(st == "device" for _, st in adb_devices(adb))
@@ -382,7 +385,7 @@ def connect_adb(cfg):
     if no_phone:
         addr = auto_connect(adb, cfg.get("wifi_last_address", ""), cfg.get("wifi_serials", []))
         if addr:
-            ui.info(f"  Phone found over Wi-Fi ({addr}).")
+            ui.info("  " + tr("Phone found over Wi-Fi (%s).", addr))
             remember(cfg, addr, adb)
     deadline = time.monotonic() + wait
     told_unauth = False
@@ -390,29 +393,29 @@ def connect_adb(cfg):
         try:
             devs = adb_devices(adb)
         except (OSError, subprocess.SubprocessError) as e:
-            return None, f"adb error: {e}"
+            return None, tr("%s error: %s", "adb", e)
         ready = usb_first([s for s, st in devs if st == "device"])
         if ready:
             serial = ready[0]
             if len(ready) > 1:
-                idx = ui.choose("Several phones found - which one", ready)
+                idx = ui.choose(tr("Several phones found - which one"), ready)
                 serial = ready[idx]
             try:
                 return AdbSource(adb, serial), None
             except (OSError, subprocess.SubprocessError) as e:
-                return None, f"adb error: {e}"
+                return None, tr("%s error: %s", "adb", e)
         if any(st == "unauthorized" for _, st in devs) and not told_unauth:
-            ui.warn("  Phone found but not authorised: unlock the phone and confirm "
-                    "'Allow USB debugging' (tick 'Always allow from this computer').")
+            ui.warn("  " + tr("Phone found but not authorised: unlock the phone and confirm "
+                              "'Allow USB debugging' (tick 'Always allow from this computer')."))
             told_unauth = True
             deadline = max(deadline, time.monotonic() + 60)
         if time.monotonic() > deadline:
             if any(st == "unauthorized" for _, st in devs):
-                return None, "the phone did not allow USB debugging for this computer"
+                return None, tr("the phone did not allow USB debugging for this computer")
             if devs:
-                return None, f"phone state is '{devs[0][1]}' (not ready)"
-            return None, ("no phone with USB debugging enabled was found (and no paired phone "
-                          "with wireless debugging in this Wi-Fi)")
+                return None, tr("phone state is '%s' (not ready)", devs[0][1])
+            return None, tr("no phone with USB debugging enabled was found (and no paired phone "
+                            "with wireless debugging in this Wi-Fi)")
         time.sleep(0.5)
 
 
@@ -436,7 +439,7 @@ IMPORT_EXCLUDES = {"@eadir", "$recycle.bin", "recycler", "system volume informat
 class FolderSource:
     """Any directory tree: the phone mounted via MTP, a card reader, or an old backup (import)."""
 
-    def __init__(self, root, kind="Folder", device_name="", description="",
+    def __init__(self, root, kind=N_("Folder"), device_name="", description="",
                  key_prefix="", verify_source=False, exclude_dirs=()):
         self.root = Path(root)
         self.kind = kind
@@ -513,7 +516,7 @@ def _gvfs_name(mount_dir_name):
 def find_gvfs_mtp():
     """Linux: find (or mount) the phone via gvfs. Returns FolderSource or (None, reason)."""
     if not hasattr(os, "getuid"):
-        return None, "not Linux"
+        return None, tr("not Linux")
     base = Path(f"/run/user/{os.getuid()}/gvfs")
 
     def scan():
@@ -534,7 +537,7 @@ def find_gvfs_mtp():
         try:
             out = _run(["gio", "mount", "-li"], timeout=20).stdout.decode("utf-8", "replace")
             for uri in sorted(set(re.findall(r"activation_root=(mtp://\S+)", out))):
-                ui.info(f"  Mounting {uri} via MTP (can take a while) ...")
+                ui.info("  " + tr("Mounting %s via MTP (can take a while) ...", uri))
                 _run(["gio", "mount", uri], timeout=120)
             for _ in range(60):
                 found = scan()
@@ -544,16 +547,16 @@ def find_gvfs_mtp():
         except (OSError, subprocess.SubprocessError):
             pass
     if not found:
-        return None, ("no phone found via MTP - unlock the phone and choose "
-                      "'File transfer' in the USB notification")
+        return None, tr("no phone found via MTP - unlock the phone and choose "
+                        "'File transfer' in the USB notification")
     mount, storage = found[0]
-    return FolderSource(storage, kind="MTP (fallback)", device_name=_gvfs_name(mount.name),
-                        description=f"MTP via gvfs: {storage}"), None
+    return FolderSource(storage, kind=N_("MTP (fallback)"), device_name=_gvfs_name(mount.name),
+                        description=tr("MTP via gvfs: %s", storage)), None
 
 
 class WindowsMtpSource:
     """Windows: read the phone through the Explorer shell (needs: pip install pywin32)."""
-    kind = "MTP (fallback)"
+    kind = N_("MTP (fallback)")
     supports_phone_hash = False
 
     def __init__(self, shell, storage_folder, device_name):
@@ -561,7 +564,7 @@ class WindowsMtpSource:
         self.storage = storage_folder
         self.device_name = device_name
         self.serial = ""
-        self.description = f"MTP via Windows Explorer: {device_name}"
+        self.description = tr("MTP via Windows Explorer: %s", device_name)
         self.fallback_reason = None
         self.staging = None
         self._items = {}
@@ -629,7 +632,7 @@ class WindowsMtpSource:
 
     def open_stream(self, sf):
         if not self.staging:
-            raise RuntimeError("staging folder not set")
+            raise RuntimeError(tr("staging folder not set"))
         tmp = Path(self.staging) / uuid.uuid4().hex
         tmp.mkdir(parents=True, exist_ok=True)
         try:
@@ -652,7 +655,7 @@ class WindowsMtpSource:
                             pass
                 time.sleep(0.25)
             else:
-                raise TimeoutError(f"copy from phone timed out: {sf.rel}")
+                raise TimeoutError(tr("copy from phone timed out: %s", sf.rel))
             yield from file_chunks(target)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -668,7 +671,7 @@ def find_windows_mtp():
     try:
         import win32com.client  # type: ignore
     except ImportError:
-        return None, "pywin32 is not installed (run: pip install pywin32)"
+        return None, tr("%s is not installed (run: %s)", "pywin32", "pip install pywin32")
     try:
         shell = win32com.client.Dispatch("Shell.Application")
         pc = shell.NameSpace(17)   # "This PC"
@@ -687,9 +690,9 @@ def find_windows_mtp():
                 if any(it.Name == "DCIM" for it in stf.Items()):
                     return WindowsMtpSource(shell, stf, dev.Name), None
     except Exception as e:  # noqa: BLE001
-        return None, f"Windows MTP error: {e}"
-    return None, ("no phone found via MTP - unlock the phone and choose "
-                  "'File transfer' in the USB notification")
+        return None, tr("Windows MTP error: %s", e)
+    return None, tr("no phone found via MTP - unlock the phone and choose "
+                    "'File transfer' in the USB notification")
 
 
 # =========================================================================== entry
@@ -698,26 +701,27 @@ def connect_source(cfg):
     """ADB first; if that fails, say so clearly and fall back to MTP / a folder."""
     src, reason = connect_adb(cfg)
     if src:
-        ui.ok(f"Connected via ADB: {src.manufacturer} {src.device_name} (Android {src.android})")
+        ui.ok(tr("Connected via ADB: %s %s (Android %s)", src.manufacturer, src.device_name,
+                 src.android))
         return src
     ui.warn("")
     ui.warn("!" * 70)
-    ui.warn(f"  ADB is NOT working: {reason}.")
-    ui.warn("  -> Using the MTP FALLBACK instead (slower; the hash check then compares")
-    ui.warn("     the received data with the written copies, not with the phone itself).")
+    ui.warn("  " + tr("ADB is NOT working: %s.", reason))
+    ui.warn("  -> " + tr("Using the MTP FALLBACK instead (slower; the hash check then compares "
+                         "the received data with the written copies, not with the phone itself)."))
     ui.warn("!" * 70)
     if sys.platform.startswith("win"):
         mtp, why = find_windows_mtp()
     else:
         mtp, why = find_gvfs_mtp()
     if mtp:
-        ui.ok(f"Connected via MTP fallback: {mtp.device_name}")
+        ui.ok(tr("Connected via MTP fallback: %s", mtp.device_name))
         mtp.fallback_reason = reason
         return mtp
-    ui.error(f"MTP fallback did not work either: {why}")
-    path = ui.ask_directory("Choose the folder of the phone storage (the folder that contains DCIM)")
+    ui.error(tr("MTP fallback did not work either: %s", why))
+    path = ui.ask_directory(tr("Choose the folder of the phone storage (the folder that contains DCIM)"))
     if path and Path(path).is_dir():
-        src = FolderSource(path, kind="Folder (manual)", description=path)
+        src = FolderSource(path, kind=N_("Folder (manual)"), description=path)
         src.fallback_reason = f"ADB: {reason}; MTP: {why}"
         return src
     return None

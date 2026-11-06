@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 
+from .i18n import tr
+
 if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
     os.system("")  # enables ANSI colour codes in the Windows console
 
@@ -23,35 +25,45 @@ def set_handler(handler):
     _handler = handler
 
 
+def _shown(msg):
+    """A report.Shown (English value for the program) is shown in the chosen language."""
+    return getattr(msg, "local", msg)
+
+
 def _c(code, text):
     return f"\033[{code}m{text}\033[0m" if _COLOR else text
 
 
 def info(msg):
+    msg = _shown(msg)
     if _handler:
         return _handler.log("info", msg)
     print(msg)
 
 
 def ok(msg):
+    msg = _shown(msg)
     if _handler:
         return _handler.log("ok", msg)
     print(_c("32", msg))
 
 
 def warn(msg):
+    msg = _shown(msg)
     if _handler:
         return _handler.log("warn", msg)
     print(_c("33;1", msg))
 
 
 def error(msg):
+    msg = _shown(msg)
     if _handler:
         return _handler.log("error", msg)
     print(_c("31;1", msg))
 
 
 def title(msg):
+    msg = _shown(msg)
     if _handler:
         return _handler.log("title", msg)
     print()
@@ -72,7 +84,7 @@ def ask(prompt, default=None, allow_empty=False):
             return str(default)
         if ans or allow_empty:
             return ans
-        print("  Please enter a value.")
+        print("  " + tr("Please enter a value."))
 
 
 def ask_install(title, text, details):
@@ -82,13 +94,15 @@ def ask_install(title, text, details):
     import re
     plain = lambda t: re.sub(r"<[^>]+>", "", t.replace("<br>", "\n").replace("</li>", "\n"))
     print(f"\n=== {title} ===\n{plain(text)}\n{plain(details)}")
-    return ask_yes_no("Install on the phone now?", default=False)
+    return ask_yes_no(tr("Install on the phone now?"), default=False)
 
 
 def ask_yes_no(prompt, default=True):
     if _handler:
         return _handler.ask_yes_no(prompt, default)
-    d = "Y/n" if default else "y/N"
+    d = tr("Y/n") if default else tr("y/N")
+    yes = {"y", "yes", "j", "ja", tr("y").lower(), tr("yes").lower()}
+    no = {"n", "no", "nein", tr("n").lower(), tr("no").lower()}
     while True:
         try:
             ans = input(f"{prompt} [{d}]: ").strip().lower()
@@ -96,9 +110,9 @@ def ask_yes_no(prompt, default=True):
             ans = ""
         if not ans:
             return default
-        if ans in ("y", "yes", "j", "ja"):
+        if ans in yes:
             return True
-        if ans in ("n", "no", "nein"):
+        if ans in no:
             return False
 
 
@@ -112,14 +126,14 @@ def choose(prompt, options, default=1):
         ans = ask(prompt, str(default) if default else None)
         if ans.isdigit() and 1 <= int(ans) <= len(options):
             return int(ans) - 1
-        print("  Invalid choice.")
+        print("  " + tr("Invalid choice."))
 
 
 def ask_directory(prompt):
     """Ask for a folder; returns '' if cancelled."""
     if _handler:
         return _handler.ask_directory(prompt)
-    return ask(prompt + " (or press Enter to cancel)", allow_empty=True)
+    return ask(tr("%s (or press Enter to cancel)", prompt), allow_empty=True)
 
 
 def parse_numbers(text, maximum):
@@ -149,10 +163,10 @@ def human_duration(seconds):
     h, rest = divmod(seconds, 3600)
     m, s = divmod(rest, 60)
     if h:
-        return f"{h} h {m:02d} min {s:02d} s"
+        return tr("%d h %02d min %02d s", h, m, s)
     if m:
-        return f"{m} min {s:02d} s"
-    return f"{s} s"
+        return tr("%d min %02d s", m, s)
+    return tr("%d s", s)
 
 
 last_transfer = None          # {"files", "bytes", "seconds"} of the last finished Progress (summary)
@@ -216,9 +230,9 @@ class Progress:
             pct = 100.0 * self.bytes / self.total_bytes if self.total_bytes else 100.0
             active = list(self._active.values()) or ([current] if current else [])
             files = self.files
-        line = (f"  {pct:5.1f}%  {files}/{self.total_files} files  "
-                f"{human_size(self.bytes)}/{human_size(self.total_bytes)}  "
-                f"{human_size(speed)}/s  ETA {human_duration(remaining)}  {', '.join(active)}")
+        line = "  " + tr("%5.1f%%  %d/%d files  %s/%s  %s/s  ETA %s  %s", pct, files,
+                         self.total_files, human_size(self.bytes), human_size(self.total_bytes),
+                         human_size(speed), human_duration(remaining), ", ".join(active))
         if _handler:
             _handler.progress({"files": files, "total_files": self.total_files,
                                "to_go": max(self.total_files - files, 0), "percent": pct,

@@ -25,14 +25,17 @@ from . import gfs, ui
 from .backup import Dest
 from .copier import Cancelled
 from .export import EXPORT_DIR, Catalog, _verified_copy, has_catalog
+from .i18n import N_, tr
 from .index import INTERNAL_DIR, BackupIndex
+from .report import shown
 
 SIMPLE, GFS = "simple", "gfs"
-NAMES = {SIMPLE: "Simple", GFS: "Grandfather-Father-Son"}
+# English names – show them with tr(NAMES[plan]) / tr(DESCRIPTION[plan]); the plan key is stored
+NAMES = {SIMPLE: N_("Simple"), GFS: N_("Grandfather-Father-Son")}
 DESCRIPTION = {
-    SIMPLE: "one folder that grows – only new photos and videos are added",
-    GFS: "dated full / differential / incremental backups (full every 3 months, differential "
-         "monthly, incremental in between) – older states can be restored",
+    SIMPLE: N_("one folder that grows – only new photos and videos are added"),
+    GFS: N_("dated full / differential / incremental backups (full every 3 months, differential "
+            "monthly, incremental in between) – older states can be restored"),
 }
 
 
@@ -67,9 +70,10 @@ def check_switch(base, parent_name, plan):
     """Error text when the drive already holds this phone's backup with the other plan."""
     have = folder_plan(Path(base) / parent_name)
     if have and have != plan:
-        return (f"“{Path(base) / parent_name}” already holds a {NAMES[have].lower()} backup of this "
-                f"phone. A {NAMES[plan]} backup needs its own folder – add another folder on the "
-                f"drive (e.g. “PhoneBackups-GFS”) for it, or keep the plan “{NAMES[have]}”.")
+        return tr("“%s” already holds a %s backup of this phone. A %s backup needs its own "
+                  "folder – add another folder on the drive (e.g. “PhoneBackups-GFS”) for it, or "
+                  "keep the plan “%s”.", Path(base) / parent_name, tr(NAMES[have]).lower(),
+                  tr(NAMES[plan]), tr(NAMES[have]))
     return None
 
 
@@ -150,7 +154,9 @@ class GfsDest(Dest):
         return [(r, v) for r, v in sorted(items) if r not in self.written_rels]
 
     def describe(self):
-        return f"{NAMES[GFS]} – {gfs.ROLE[self.mode]} ({self.mode}): {self.why}"
+        """Shown text (chosen language)."""
+        return tr("%s – %s (%s): %s", tr(NAMES[GFS]), tr(gfs.ROLE[self.mode]),
+                  gfs.mode_name(self.mode), self.why)
 
 
 def open_gfs(label, base, parent_name, started, now=None):
@@ -175,7 +181,7 @@ def open_gfs(label, base, parent_name, started, now=None):
     d = GfsDest(label, Path(base), set_dir / folder, GfsIndex(set_dir, state), set_dir=set_dir,
                 cat=cat, run_id=run_id, run_folder=folder, mode=mode, why=why, state=state,
                 prev_state=dict(state), last_full_id=last_full)
-    ui.info(f"  {label}: {d.describe()}")
+    ui.info(f"  {shown(label)}: {d.describe()}")
     return d
 
 
@@ -192,8 +198,9 @@ def finish_gfs(d, status, cfg, cancel=None):
     todo = d.carry_list() if status == "COMPLETED" else []
     if todo:
         total = sum(v[1] for _, v in todo)
-        ui.info(f"  {d.label}: building the {d.mode} backup – copying {len(todo)} earlier files "
-                f"({ui.human_size(total)}) on the drive …")
+        ui.info("  " + tr("%s: building the %s backup – copying %d earlier files (%s) on the "
+                          "drive …", shown(d.label), gfs.mode_name(d.mode), len(todo),
+                          ui.human_size(total)))
         tmp = d.tmp
         tmp.mkdir(parents=True, exist_ok=True)
         phone_transfer = ui.last_transfer          # the summary shows the phone transfer
@@ -214,12 +221,12 @@ def finish_gfs(d, status, cfg, cancel=None):
                     d.carried_bytes += size
                 if st.startswith("ERROR"):
                     d.errors += 1
-                    ui.error(f"  {rel}: {st}")
+                    ui.error(f"  {rel}: {shown(st)}")
         except Cancelled:
             status = "CANCELLED by user"
         except Exception as e:  # noqa: BLE001 - close the run and write the report anyway
             status = f"STOPPED - {type(e).__name__}: {e}"
-            ui.error(f"  {d.label}: {status}")
+            ui.error(f"  {shown(d.label)}: {shown(status)}")
         finally:
             prog.finish()
             ui.last_transfer = phone_transfer
@@ -227,7 +234,7 @@ def finish_gfs(d, status, cfg, cancel=None):
     if d.mode == "incremental" and not d.written_rels and status == "COMPLETED" and not d.errors:
         d.cat.drop_run(d.run_id)          # nothing new: no empty incremental folder
         d.run_dropped = True
-        ui.info(f"  {d.label}: nothing new – no new incremental backup needed.")
+        ui.info("  " + tr("%s: nothing new – no new incremental backup needed.", shown(d.label)))
     else:
         run_status = status if not d.errors or status != "COMPLETED" else "COMPLETED WITH ERRORS"
         d.cat.finish_run(d.run_id, run_status)

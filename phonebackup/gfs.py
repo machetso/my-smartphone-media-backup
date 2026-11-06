@@ -16,11 +16,20 @@ needs for its restore:
 
 from datetime import datetime
 
+from .i18n import N_, tr, trp
+
 REMOVED = "REMOVED"
 FULL_MONTHS = 3
 DIFF_MONTHS = 1
 KEEP = {"full": 4, "differential": 3, "incremental": 6}
-ROLE = {"full": "Grandfather", "differential": "Father", "incremental": "Son"}
+# English names – show them with tr(ROLE[mode]); the mode itself (full/…) is stored, never translated
+ROLE = {"full": N_("Grandfather"), "differential": N_("Father"), "incremental": N_("Son")}
+MODE_NAME = {"full": N_("full"), "differential": N_("differential"), "incremental": N_("incremental")}
+
+
+def mode_name(mode):
+    """'full' / 'differential' / 'incremental' as shown (the English word stays in folder names)."""
+    return tr(MODE_NAME[mode]) if mode in MODE_NAME else mode
 
 
 def add_months(dt, n):
@@ -49,25 +58,36 @@ def _done(r):
 
 
 def choose(runs, now=None, full_months=FULL_MONTHS, diff_months=DIFF_MONTHS):
-    """(mode, reason) for the next export."""
+    """(mode, reason) for the next export – the reason is shown text (chosen language)."""
     now = now or datetime.now()
     runs = active(runs)
     fulls = [r for r in runs if r.type == "full" and _done(r)]
     if not fulls:
-        return "full", "there is no complete full export on this storage yet"
+        return "full", tr("there is no complete full export on this storage yet")
     full = fulls[-1]
     if now >= add_months(_when(full), full_months):
-        return "full", (f"the last full export ({_when(full):%Y-%m-%d}) is more than "
-                        f"{full_months} months old")
+        return "full", trp("the last full export (%s) is more than %d month old",
+                           "the last full export (%s) is more than %d months old", full_months,
+                           f"{_when(full):%Y-%m-%d}", full_months)
     diffs = [r for r in runs if r.type == "differential" and _done(r) and r.id > full.id]
     last = diffs[-1] if diffs else full
     if now >= add_months(_when(last), diff_months):
-        what = "differential" if diffs else "full"
-        return "differential", (f"the last {what} export ({_when(last):%Y-%m-%d}) is more than "
-                                f"{diff_months} month{'s' if diff_months > 1 else ''} old")
+        when = f"{_when(last):%Y-%m-%d}"
+        if diffs:
+            return "differential", trp("the last differential export (%s) is more than %d month old",
+                                       "the last differential export (%s) is more than %d months old",
+                                       diff_months, when, diff_months)
+        return "differential", trp("the last full export (%s) is more than %d month old",
+                                   "the last full export (%s) is more than %d months old",
+                                   diff_months, when, diff_months)
     due = add_months(_when(last), diff_months)
-    return "incremental", (f"the last {'differential' if diffs else 'full'} export is from "
-                           f"{_when(last):%Y-%m-%d} – the next differential is due from {due:%Y-%m-%d}")
+    if diffs:
+        why = tr("the last differential export is from %s – the next differential is due from %s",
+                 f"{_when(last):%Y-%m-%d}", f"{due:%Y-%m-%d}")
+    else:
+        why = tr("the last full export is from %s – the next differential is due from %s",
+                 f"{_when(last):%Y-%m-%d}", f"{due:%Y-%m-%d}")
+    return "incremental", why
 
 
 def chain(runs, upto_id):
@@ -113,4 +133,5 @@ def to_retire(runs, keep=None):
 
 
 def label(run):
-    return f"{ROLE.get(run.type, '?')} ({run.type})"
+    """Shown text, e.g. 'Grandfather (full)' in the chosen language."""
+    return tr("%s (%s)", tr(ROLE[run.type]) if run.type in ROLE else "?", mode_name(run.type))

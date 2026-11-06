@@ -13,6 +13,7 @@ import re
 from datetime import datetime
 
 from . import config
+from .i18n import tr, trp
 
 
 def record(cfg, phone, owner, folders, destinations, files, size, status, model="",
@@ -58,7 +59,19 @@ def phones(cfg):
     return sorted(found, key=lambda e: e.get("when", ""), reverse=True)
 
 
-_FIELD = re.compile(r"^\s*(Smartphone|Owner|Status|Started)\s*:\s*(.+?)\s*$", re.M)
+_FIELDS = ("Smartphone", "Owner", "Status", "Started")
+
+
+def _read_fields(text):
+    """The report fields above, also from a report written in another language (labels are
+    translated): {English label: value}."""
+    from .phoneid import report_labels
+    out = {}
+    for en in _FIELDS:
+        m = re.search(r"^\s*(?:%s)\s*:\s*(.+?)\s*$" % report_labels(en), text, re.M)
+        if m:
+            out[en] = m.group(1)
+    return out
 
 
 def discover(cfg):
@@ -66,6 +79,7 @@ def discover(cfg):
     version), read from their newest report. Old-phone imports are not phones to back up."""
     from .backup import backup_parent_name
     from .locations import find_backups
+    from .report import english
     known = cfg.setdefault("phones", {})
     hidden = set(cfg.get("phones_hidden", []))
     lb = cfg.get("last_backup")
@@ -82,7 +96,7 @@ def discover(cfg):
             continue
         try:
             with open(reports[-1], encoding="utf-8", errors="replace") as f:
-                fields = dict(_FIELD.findall(f.read(20000)))
+                fields = _read_fields(f.read(20000))
         except OSError:
             continue
         if not fields.get("Smartphone"):
@@ -91,7 +105,7 @@ def discover(cfg):
                       "owner": fields.get("Owner", ""), "folders": [],
                       "destinations": [os.path.dirname(parent)],
                       "when": fields.get("Started", "").replace(" ", "T")[:16],
-                      "files": 0, "bytes": 0, "status": fields.get("Status", ""),
+                      "files": 0, "bytes": 0, "status": english(fields.get("Status", "")),
                       "keep_structure": False}
         changed = True
     if changed:
@@ -108,7 +122,10 @@ def title(lb):
     owner, phone = (lb.get("owner") or "").strip(), lb.get("phone", "")
     if not owner:
         return phone
-    return f"{owner}' {phone}" if owner[-1].lower() in "sxzß" else f"{owner}'s {phone}"
+    # two templates: names ending in s/x/z/ß take only the apostrophe (English, German)
+    if owner[-1].lower() in "sxzß":
+        return tr("%1$s' %2$s", owner, phone)
+    return tr("%1$s's %2$s", owner, phone)
 
 
 def _same_phone(a, b):
@@ -122,25 +139,27 @@ def check(lb, connected_phone, is_dir=os.path.isdir, attached_labels=()):
     that are plugged in but not mounted yet (they are mounted when the backup starts).
     """
     if lb is None:
-        return False, "No backup yet – start with “New backup”."
+        return False, tr("No backup yet – start with “New backup”.")
     dests = lb["destinations"]
     ready = [d for d in dests if is_dir(d)]
     attached = [d for d in dests if not is_dir(d) and _label(d) in attached_labels]
     problems = []
     if not connected_phone:
-        problems.append(f"Connect {lb['phone']}.")
+        problems.append(tr("Connect %s.", lb['phone']))
     elif not (_same_phone(connected_phone, lb.get("model")) or _same_phone(connected_phone, lb["phone"])):
-        problems.append(f"The connected phone is a {connected_phone}, the last backup was of a "
-                        f"{lb['phone']} – use “New backup” for this phone.")
+        problems.append(tr("The connected phone is a %s, the last backup was of a "
+                           "%s – use “New backup” for this phone.", connected_phone, lb['phone']))
     if not ready and not attached:
         names = ", ".join(_short(d) for d in dests)
-        problems.append(f"Connect a backup drive ({names}).")
+        problems.append(tr("Connect a backup drive (%s).", names))
     if problems:
         return False, " ".join(problems)
     missing = len(dests) - len(ready) - len(attached)
-    hint = "Ready – copies only the new photos and videos."
+    hint = tr("Ready – copies only the new photos and videos.")
     if missing:
-        hint += f" {missing} of {len(dests)} backup drives not connected – they are skipped."
+        hint += " " + trp("%d of %d backup drive not connected – it is skipped.",
+                          "%d of %d backup drives not connected – they are skipped.",
+                          len(dests), missing, len(dests))
     return True, hint
 
 

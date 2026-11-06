@@ -47,15 +47,30 @@ from pathlib import Path
 from . import gfs, ui
 from .copier import Cancelled, file_chunks
 from .export import EXPORT_DIR, Catalog, _category, scan_backup
-from .gdrive import (FOLDER_MIME, ROOT_NAME, UPLOAD_WORKERS, Drive, DriveError, NotSignedIn,
-                     _q, API)
+from .gdrive import (FOLDER_MIME, ROOT_NAME, STATUS_FULL, STATUS_SIGNIN_LOST, UPLOAD_WORKERS, Drive,
+                     DriveError, DriveFull, NotSignedIn, _q, API, attention, category_label,
+                     files_size)
+from .i18n import N_, tr, trp
 from .index import open_readonly_lookup
-from .report import unique_basename, write_reports
+from .report import both, unique_basename, write_reports
 from .safety import inside, safe_component, safe_rel, valid_run_folder
 
 SUFFIX = " (Grandfather-Father-Son)"
 CAT_REL = f"{EXPORT_DIR}/catalog.sqlite"
 PREFIX = "gdrive-gfs:"                       # restore list entries: "gdrive-gfs:<Phone - Owner>"
+
+
+class NoGfsBackup(DriveError):
+    """There is no Grandfather-Father-Son backup of this phone on Google Drive (yet)."""
+    code = "no_gfs_backup"
+
+
+_MODES = (N_("full"), N_("differential"), N_("incremental"))          # shown as tr(mode)
+
+
+def _role(mode):
+    """'Grandfather (full)' in the chosen language."""
+    return tr("%s (%s)", tr(gfs.ROLE[mode]), tr(mode))
 
 
 def folder_name(set_name):
@@ -65,7 +80,7 @@ def folder_name(set_name):
 def local_dir(set_name) -> Path:
     from .adbdownload import data_dir
     if safe_component(set_name) is None:          # a folder name from Google Drive: untrusted
-        raise DriveError(f"Unusable backup name on Google Drive: {set_name!r}")
+        raise DriveError(tr("Unusable backup name on Google Drive: %s", repr(set_name)), "bad_name")
     return Path(data_dir()) / "gdrive-gfs" / set_name
 
 
@@ -89,7 +104,7 @@ class DriveSet:
                      f"trashed = false and {_q(root)} in parents", "fields": "files(id)",
                 "spaces": "drive"})
             if not r.get("files"):
-                raise DriveError(f"No Grandfather-Father-Son backup of {set_name} on Google Drive.")
+                raise NoGfsBackup(tr("No Grandfather-Father-Son backup of %s on Google Drive.", set_name))
             self.id = r["files"][0]["id"]
         self.remote, self.folders = drive.list_tree(self.id)
         base = local_dir(set_name)
@@ -176,10 +191,11 @@ def _check_catalog(path):
         finally:
             db.close()
     except sqlite3.Error as e:
-        raise DriveError(f"The catalog on Google Drive is damaged: {e}") from e
+        raise DriveError(tr("The catalog on Google Drive is damaged: %s", e), "catalog") from e
     if not ok or any(t in ("trigger", "view") for t, _ in kinds) or not {
             ("table", "runs"), ("table", "files")} <= kinds:
-        raise DriveError("The catalog on Google Drive is damaged or was changed – not used.")
+        raise DriveError(tr("The catalog on Google Drive is damaged or was changed – not used."),
+                         "catalog")
 
 
 def _clean_old_work(base):
@@ -268,23 +284,23 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
     started = datetime.now()
     t0 = time.monotonic()
     acct = drive.account()
-    ui.info(f"Google Drive: {acct['email']}")
-    ui.info("Reading the Grandfather-Father-Son backups on Google Drive …")
+    ui.info(tr("Google Drive: %s", acct["email"]))
+    ui.info(tr("Reading the Grandfather-Father-Son backups on Google Drive …"))
     ds = DriveSet(drive, name)
     _sets.append(ds)
     cat = ds.catalog()
     chosen_by = None
     if mode == "auto":
         mode, why = gfs.choose(cat.runs(), now)
-        chosen_by = f"Grandfather-Father-Son scheme: {gfs.ROLE[mode]} ({mode}) because {why}"
+        chosen_by = tr("Grandfather-Father-Son scheme: %s because %s", _role(mode), why)
         ui.info(chosen_by)
     state, full = _state(cat)
     if mode != "full" and full is None:
         cat.close()
-        raise ValueError("A differential or incremental export needs a full export first.")
+        raise ValueError(tr("A differential or incremental export needs a full export first."))
     full_files = cat.files_of([full.id]) if full else {}
 
-    ui.info("Scanning the backup folder …")
+    ui.info(tr("Scanning the backup folder …"))
     current = scan_backup(source_parent)
     known = open_readonly_lookup(source_parent)
     items = plan_items(mode, current, state, full_files)
@@ -299,8 +315,10 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
                   and mirror[r].get("sha256") else a) for r, s, m, a in items]
         n_m = sum(1 for it in items if it[3] == "mirror")
         if n_m:
-            ui.info(f"  {n_m} of them are already in the Copy on Google Drive – linked there "
-                    "instead of uploaded (when the SHA-256 matches).")
+            ui.info("  " + trp("%d of them is already in the Copy on Google Drive – linked there "
+                               "instead of uploaded (when the SHA-256 matches).",
+                               "%d of them are already in the Copy on Google Drive – linked there "
+                               "instead of uploaded (when the SHA-256 matches).", n_m, n_m))
     orphan = {}                    # rel -> (folder, entry): files of an interrupted earlier export
     for of, files in sorted(ds.orphans({r.folder for r in cat.runs()}).items()):
         for rel, v in files.items():
@@ -311,24 +329,30 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
                  for r, s, m, a in items]
         n_o = sum(1 for it in items if it[3] == "adopt")
         if n_o:
-            ui.info(f"  {n_o} of them were already uploaded by an earlier export that did not finish "
-                    "– they are reused (moved, not uploaded again) when the SHA-256 matches.")
+            ui.info("  " + trp("%d of them was already uploaded by an earlier export that did not "
+                               "finish – it is reused (moved, not uploaded again) when the SHA-256 "
+                               "matches.",
+                               "%d of them were already uploaded by an earlier export that did not "
+                               "finish – they are reused (moved, not uploaded again) when the SHA-256 "
+                               "matches.", n_o, n_o))
     up = [it for it in items if it[3] in ("upload", "mirror", "adopt")]
     cp = [it for it in items if it[3] == "link"]
     up_bytes = sum(it[1] for it in up)
     cp_bytes = sum(it[1] for it in cp)
-    ui.info(f"  {gfs.ROLE[mode]} ({mode}): {len(items)} files – {len(up)} to upload "
-            f"({ui.human_size(up_bytes)}), {len(cp)} already stored on Google Drive – linked "
-            f"(shortcuts, no extra space).")
+    ui.info("  " + trp("%s: %d file – %d to upload (%s), %d already stored on Google Drive – "
+                       "linked (shortcuts, no extra space).",
+                       "%s: %d files – %d to upload (%s), %d already stored on Google Drive – "
+                       "linked (shortcuts, no extra space).", len(items), _role(mode), len(items),
+                       len(up), ui.human_size(up_bytes), len(cp)))
     if mode == "incremental" and not items:
         cat.close()
-        verdict = "NOTHING NEW - every file of the backup is already in the Google Drive backups."
+        verdict = both.tr("NOTHING NEW - every file of the backup is already in the Google Drive backups.")
         ui.ok(verdict)
         return "COMPLETED", [], verdict
     if acct["free"] is not None and up_bytes > acct["free"]:
         cat.close()
-        raise DriveError(f"Not enough space on Google Drive: {ui.human_size(acct['free'])} free, "
-                         f"{ui.human_size(up_bytes)} needed.")
+        raise DriveError(tr("Not enough space on Google Drive: %s free, %s needed.",
+                            ui.human_size(acct["free"]), ui.human_size(up_bytes)), "no_space")
 
     folder = f"{started:%Y-%m-%d_%H-%M-%S}_{mode}"
     n = 2
@@ -349,7 +373,7 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
         sha, done = "", False
         try:
             if action == "lost":
-                return [nr, fname, _category(rel), ui.human_size(sz), sz, rel,
+                return [nr, fname, tr(_category(rel)), ui.human_size(sz), sz, rel,
                         "ERROR: no longer on Google Drive and not in the backup – cannot be added", "",
                         action, mt]
             pid = drive.ensure_path(ds.folders, f"{folder}/{folder_rel}" if folder_rel else folder)
@@ -368,7 +392,8 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
                     prog.update(add_bytes=sz)
                     st = "OK - reused from an earlier unfinished upload (moved, SHA-256 checked)"
                     done = True
-                    return [nr, fname, _category(rel), ui.human_size(sz), sz, rel, st, sha, "adopt", mt]
+                    return [nr, fname, tr(_category(rel)), ui.human_size(sz), sz, rel, st, sha, "adopt",
+                            mt]
                 action = "upload"                    # other data there: upload
             if action == "mirror":
                 k = known.get(rel)
@@ -384,7 +409,8 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
                     prog.update(add_bytes=sz)
                     st = "OK - linked to the file in the Copy on Google Drive (SHA-256 checked)"
                     done = True
-                    return [nr, fname, _category(rel), ui.human_size(sz), sz, rel, st, sha, "link", mt]
+                    return [nr, fname, tr(_category(rel)), ui.human_size(sz), sz, rel, st, sha, "link",
+                            mt]
                 action = "upload"                    # the Copy holds other data: upload
             if action == "upload":
                 k = known.get(rel)
@@ -419,12 +445,12 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
             return None
         except (DriveError, OSError) as e:
             st = f"ERROR: {e}"
-            if str(e) == "Google Drive is full.":
-                fatal.append("STOPPED - Google Drive is full")
+            if isinstance(e, DriveFull):
+                fatal.append(STATUS_FULL)
                 stop.set()
         finally:
             prog.end(token, done=done)
-        return [nr, fname, _category(rel), ui.human_size(sz), sz, rel, st, sha, action, mt]
+        return [nr, fname, tr(_category(rel)), ui.human_size(sz), sz, rel, st, sha, action, mt]
 
     rows, errors, warnings, by_cat = [], 0, 0, {}
     status = "COMPLETED"
@@ -448,12 +474,12 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
                     by_cat[c][1] += sz
                     if row[8] == "upload":
                         by_cat[c][2] += sz
-                rows.append(row[:8] + [{"upload": "uploaded", "adopt": "reused (moved)"}.get(row[8],
-                                                                                "linked (shortcut)")])
+                rows.append(row[:8] + [{"upload": tr("uploaded"), "adopt": tr("reused (moved)")}.get(
+                    row[8], tr("linked (shortcut)"))])
     finally:
         prog.finish()
         if any(isinstance(e, NotSignedIn) for e in fatal):
-            status = "STOPPED - Google sign-in is no longer valid"
+            status = STATUS_SIGNIN_LOST
         elif cancel is not None and cancel.is_set():
             status = "CANCELLED by user"
         elif fatal:
@@ -470,17 +496,18 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
             if not left and of in ds.folders:
                 try:
                     drive.delete(ds.folders[of])
-                    ui.info(f"  Removed the empty folder of the unfinished export {of}.")
+                    ui.info("  " + tr("Removed the empty folder of the unfinished export %s.", of))
                 except DriveError as e:
                     ui.warn(f"  {of}: {e}")
             elif left:
-                ui.warn(f"  {of}: {len(left)} file(s) of the unfinished export were not reused and "
-                        "are kept.")
+                ui.warn("  " + trp("%s: %d file of the unfinished export was not reused and is kept.",
+                                   "%s: %d files of the unfinished export were not reused and are "
+                                   "kept.", len(left), of, len(left)))
         try:
             ds.save_catalog()
         except (DriveError, OSError) as e:
-            cat_problem = f"the catalog could not be saved on Google Drive ({e})"
-            ui.error(f"Google Drive: {cat_problem}")
+            cat_problem = tr("the catalog could not be saved on Google Drive (%s)", e)
+            ui.error(tr("Google Drive: %s", cat_problem))
 
     duration = time.monotonic() - t0
     if cat_problem:
@@ -489,43 +516,51 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
     n = sum(v[0] for v in by_cat.values())
     b = sum(v[1] for v in by_cat.values())
     ub = sum(v[2] for v in by_cat.values())
-    verdict = (f"EVERYTHING EXPORTED CORRECTLY - {gfs.ROLE[mode]} ({mode}) export on Google Drive: "
-               f"{n} files ({ui.human_size(b)}) verified with SHA-256." if ok else
-               f"ATTENTION - {status}, {errors} error(s), {warnings} warning(s)")
+    verdict = (both.trp("EVERYTHING EXPORTED CORRECTLY - %s export on Google Drive: %d file (%s) verified "
+                   "with SHA-256.",
+                   "EVERYTHING EXPORTED CORRECTLY - %s export on Google Drive: %d files (%s) verified "
+                   "with SHA-256.", n, _role(mode), n, ui.human_size(b)) if ok else
+               attention(status, errors, warnings))
     if mode == "full":
-        basis = "none (full export of everything)"
+        basis = tr("none (full export of everything)")
     elif mode == "differential":
-        basis = f"last full export: {full.folder}"
+        basis = tr("last full export: %s", full.folder)
     else:
-        basis = f"the current state since the last full export ({full.folder})"
+        basis = tr("the current state since the last full export (%s)", full.folder)
     sections = [
-        ("General", [("Export type", f"Google Drive – {mode} ({gfs.ROLE[mode]})"),
-                     ("Chosen by", chosen_by or "manual choice"), ("Status", status),
-                     ("Google account", acct["email"]),
-                     ("Source (backup folder)", str(source_parent)),
-                     ("Target on Google Drive", f"My Drive/{ROOT_NAME}/{folder_name(name)}/{folder}"),
-                     ("Compared with", basis),
-                     ("Started", f"{started:%Y-%m-%d %H:%M:%S}"),
-                     ("Duration", ui.human_duration(duration)),
-                     ("Average upload speed", f"{ui.human_size(ub / duration if duration > 0 else 0)}/s")]
-         + ([("Catalog", "PROBLEM: " + cat_problem)] if cat_problem else [])),
-        ("Data exported", [("Total", f"{n} files, {ui.human_size(b)}"),
-                           ("Uploaded", ui.human_size(ub)),
-                           ("Linked (shortcuts, no extra space)", ui.human_size(b - ub))] +
-         [(c.capitalize(), f"{v[0]} files, {ui.human_size(v[1])}") for c, v in sorted(by_cat.items())] +
-         [("Files in backup", str(len(current))), ("Errors", str(errors)), ("Warnings", str(warnings))]),
+        (tr("General"), [(tr("Export type"), tr("Google Drive – %s (%s)", tr(mode), tr(gfs.ROLE[mode]))),
+                         (tr("Chosen by"), chosen_by or tr("manual choice")),
+                         (tr("Status"), tr(status)),
+                         (tr("Google account"), acct["email"]),
+                         (tr("Source (backup folder)"), str(source_parent)),
+                         (tr("Target on Google Drive"),
+                          f"My Drive/{ROOT_NAME}/{folder_name(name)}/{folder}"),
+                         (tr("Compared with"), basis),
+                         (tr("Started"), f"{started:%Y-%m-%d %H:%M:%S}"),
+                         (tr("Duration"), ui.human_duration(duration)),
+                         (tr("Average upload speed"),
+                          tr("%s/s", ui.human_size(ub / duration if duration > 0 else 0)))]
+         + ([(tr("Catalog"), tr("PROBLEM: %s", cat_problem))] if cat_problem else [])),
+        (tr("Data exported"), [(tr("Total"), files_size(n, b)),
+                               (tr("Uploaded"), ui.human_size(ub)),
+                               (tr("Linked (shortcuts, no extra space)"), ui.human_size(b - ub))] +
+         [(category_label(c), files_size(v[0], v[1])) for c, v in sorted(by_cat.items())] +
+         [(tr("Files in backup"), str(len(current))), (tr("Errors"), str(errors)),
+          (tr("Warnings"), str(warnings))]),
     ]
-    columns = ["Nr", "File", "Type", "Size", "Bytes", "Path in backup", "Status", "SHA-256", "How"]
+    columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Path in backup"),
+               tr("Status"), tr("SHA-256"), tr("How")]
     rdir = Path(report_dir) if report_dir else reports_dir(name)
     base = unique_basename(rdir, f"Google Drive {mode} export {name}", started)
-    paths = write_reports(rdir, base, f"Google Drive {mode} export {name} - {started:%Y-%m-%d %H:%M}",
+    paths = write_reports(rdir, base, tr("Google Drive %s export %s - %s", tr(mode), name,
+                                         f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections, columns, rows)
     try:                                         # the report also goes into the run folder
         pid = drive.ensure_path(ds.folders, folder)
         for p in paths:
             drive.upload(p, pid, p.name)
     except (DriveError, OSError, Cancelled) as e:
-        ui.warn(f"Report could not be uploaded to Google Drive: {e}")
+        ui.warn(tr("Report could not be uploaded to Google Drive: %s", e))
     (ui.ok if ok else ui.error)(verdict)
     return status, paths, verdict
 
@@ -552,10 +587,10 @@ def _remove_runs(_sets, set_name, cfg, run_ids, keep=None, drive=None):
         for rid in run_ids:
             r = allowed.get(rid)
             if r is None:
-                problems.append(f"export {rid} is still needed - not removed")
+                problems.append(tr("export %s is still needed - not removed", rid))
                 continue
             if not valid_run_folder(r.folder):           # the catalog may be tampered
-                problems.append(f"{r.folder}: unexpected folder - not removed")
+                problems.append(tr("%s: unexpected folder - not removed", r.folder))
                 continue
             try:
                 moved = 0
@@ -584,8 +619,10 @@ def _remove_runs(_sets, set_name, cfg, run_ids, keep=None, drive=None):
                 cat.mark_removed(rid)
                 removed.append(r.folder)
                 if moved:
-                    ui.info(f"  {r.folder}: {moved} files that newer exports still use were moved "
-                            "into them (not deleted).")
+                    ui.info("  " + trp("%s: %d file that newer exports still use was moved into "
+                                       "them (not deleted).",
+                                       "%s: %d files that newer exports still use were moved into "
+                                       "them (not deleted).", moved, r.folder, moved))
             except DriveError as e:
                 problems.append(f"{r.folder}: {e}")
     finally:
@@ -605,7 +642,7 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
     chain = gfs.chain(cat.runs(), upto_id)
     if not chain:
         cat.close()
-        raise ValueError("No completed full export found - nothing to restore from.")
+        raise ValueError(tr("No completed full export found - nothing to restore from."))
     plan, refused = {}, []
     for run in chain:                                  # later runs win
         for rel, (sz, mt, sha) in cat.files_of([run.id]).items():
@@ -615,14 +652,15 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
             plan[rel] = (run, sz, mt, sha)
     cat.close()
     for rel in refused:
-        ui.error(f"Refused (the catalog points outside the restore folder): {rel!r}")
+        ui.error(tr("Refused (the catalog points outside the restore folder): %s", repr(rel)))
     started = datetime.now()
     t0 = time.monotonic()
     tmp = restore_dir / ".restore-tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     total = sum(v[1] for v in plan.values())
-    ui.info(f"Restoring {len(plan)} files ({ui.human_size(total)}) from Google Drive: "
-            + " + ".join(r.folder for r in chain))
+    ui.info(trp("Restoring %d file (%s) from Google Drive: %s",
+                "Restoring %d files (%s) from Google Drive: %s", len(plan), len(plan),
+                ui.human_size(total), " + ".join(r.folder for r in chain)))
     prog = ui.Progress(len(plan), total)
     rows, errors, status = [], 0, "COMPLETED"
     try:
@@ -632,7 +670,7 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
             try:
                 fid = ds.file_id(run.folder, rel)          # a shortcut is followed
                 if not fid:
-                    raise DriveError("missing on Google Drive")
+                    raise DriveError(tr("missing on Google Drive"), "missing")
                 got = drive.download(fid, part, sz, on_bytes=lambda b: prog.update(add_bytes=b),
                                      cancel=cancel)
                 final = inside(restore_dir, rel)
@@ -665,18 +703,24 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
         shutil.rmtree(tmp, ignore_errors=True)
     errors += len(refused)
     ok = status == "COMPLETED" and not errors
-    verdict = (f"RESTORE OK - {len(rows)} files downloaded from Google Drive and verified." if ok
-               else f"ATTENTION - {status}, {errors} file(s) with problems")
+    verdict = (both.trp("RESTORE OK - %d file downloaded from Google Drive and verified.",
+                   "RESTORE OK - %d files downloaded from Google Drive and verified.",
+                   len(rows), len(rows)) if ok
+               else tr("ATTENTION - %s, %s", tr(status),
+                       trp("%d file with problems", "%d files with problems", errors, errors)))
     dur = time.monotonic() - t0
-    sections = [("General", [("Restored from", f"Google Drive: My Drive/{ROOT_NAME}/{folder_name(set_name)}"),
-                             ("Used exports", "\n".join(f"{r.type}: {r.folder}" for r in chain)),
-                             ("Restored to", str(restore_dir)),
-                             ("Duration", ui.human_duration(dur)),
-                             ("Average speed", f"{ui.human_size(prog.bytes / max(dur, 0.001))}/s")])]
+    sections = [(tr("General"), [
+        (tr("Restored from"), tr("Google Drive: %s", f"My Drive/{ROOT_NAME}/{folder_name(set_name)}")),
+        (tr("Used exports"), "\n".join(f"{tr(r.type)}: {r.folder}" for r in chain)),
+        (tr("Restored to"), str(restore_dir)),
+        (tr("Duration"), ui.human_duration(dur)),
+        (tr("Average speed"), tr("%s/s", ui.human_size(prog.bytes / max(dur, 0.001))))])]
     base = unique_basename(restore_dir, "Restore report", started)
-    paths = write_reports(restore_dir, base, f"Restore {set_name} from Google Drive - {started:%Y-%m-%d %H:%M}",
+    paths = write_reports(restore_dir, base,
+                          tr("Restore %s from Google Drive - %s", set_name, f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections,
-                          ["Nr", "File", "Size", "Path", "Taken from export", "Status", "SHA-256"], rows)
+                          [tr("Nr"), tr("File"), tr("Size"), tr("Path"), tr("Taken from export"),
+                           tr("Status"), tr("SHA-256")], rows)
     (ui.ok if ok else ui.error)(verdict)
     return status, paths, verdict
 

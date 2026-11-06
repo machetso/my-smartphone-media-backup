@@ -13,6 +13,8 @@ can switch debugging on for the next backup (user request 2026-11-04). See `chec
 
 import re
 
+from .i18n import tr
+
 PHONE_ROOT = "/sdcard"
 
 _Q = r"'(?:[^']|'\\'')*'"              # one argument quoted by sources._q
@@ -69,8 +71,8 @@ def check(cmd):
             paths += [_unquote(q) for q in _ONE_Q.findall(groups["many"])]
         if all(_path_ok(p) for p in paths):
             return
-        raise ForbiddenPhoneCommand(f"refused (path outside {PHONE_ROOT}): {cmd[:200]}")
-    raise ForbiddenPhoneCommand(f"refused (not a read-only backup command): {cmd[:200]}")
+        raise ForbiddenPhoneCommand(tr("refused (path outside %s): %s", PHONE_ROOT, cmd[:200]))
+    raise ForbiddenPhoneCommand(tr("refused (not a read-only backup command): %s", cmd[:200]))
 
 
 def check_control(name):
@@ -78,4 +80,4 @@ def check_control(name):
     try:
         return CONTROL[name]
     except KeyError:
-        raise ForbiddenPhoneCommand(f"refused (unknown control action): {str(name)[:80]}") from None
+        raise ForbiddenPhoneCommand(tr("refused (unknown control action): %s", str(name)[:80])) from None

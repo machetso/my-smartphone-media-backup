@@ -134,5 +134,8 @@ def backup_totals(parent):
 
 
 def describe_totals(t):
+    from .i18n import tr, trp
     from .ui import human_size
-    return f"{t[0]:,} files · {human_size(t[1])}" if t else "size unknown"
+    if not t:
+        return tr("size unknown")
+    return trp("%s file · %s", "%s files · %s", t[0], f"{t[0]:,}", human_size(t[1]))

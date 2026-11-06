@@ -16,6 +16,7 @@ Standard library only (urllib), no Google client library needed.
 """
 
 import base64
+import html
 import hashlib
 import json
 import os
@@ -35,6 +36,7 @@ from pathlib import Path
 
 from . import APP_NAME, config, ui
 from .copier import Cancelled
+from .i18n import N_, tr, trp
 from .export import _category, scan_backup
 from .index import open_readonly_lookup
 from .report import unique_basename, write_reports
@@ -67,11 +69,33 @@ LOGIN_TIMEOUT = 300
 
 
 class DriveError(Exception):
-    pass
+    """An error shown to the user: the message is in the chosen language. Code that must react
+    to a particular error checks `code` (or the subclass), never the text."""
+    code = "error"
+
+    def __init__(self, message="", code=None):
+        super().__init__(message)
+        if code:
+            self.code = code
 
 
 class NotSignedIn(DriveError):
-    pass
+    code = "not_signed_in"
+
+
+class DriveFull(DriveError):
+    """Google Drive has no space left (an upload was refused)."""
+    code = "full"
+
+    def __init__(self, message=None, code=None):
+        super().__init__(message or tr("Google Drive is full."), code)
+
+
+# run statuses stored in the catalog / returned to the caller stay English (compared in the code);
+# they are translated where they are shown (log, report)
+STATUS_FULL = N_("STOPPED - Google Drive is full")
+STATUS_SIGNIN_LOST = N_("STOPPED - Google sign-in is no longer valid")
+_STATUSES = (N_("COMPLETED"), N_("COMPLETED WITH ERRORS"), N_("CANCELLED by user"))
 
 
 def token_path() -> Path:
@@ -107,7 +131,8 @@ def sign_in(cfg, cancel=None, open_browser=webbrowser.open):
     """Browser login. Returns the signed-in account's e-mail address."""
     cid, sec = client_credentials(cfg)
     if not cid:
-        raise DriveError("Google Drive is not set up in this version (no Google key).")
+        raise DriveError(tr("Google Drive is not set up in this version (no Google key)."),
+                         "not_configured")
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     state = secrets.token_urlsafe(24)
@@ -125,10 +150,14 @@ def sign_in(cfg, cancel=None, open_browser=webbrowser.open):
             result["code"] = qs.get("code", [""])[0]
             result["error"] = qs.get("error", [""])[0]
             ok = bool(result["code"])
-            body = (f"<html><body style='font-family:sans-serif;padding:3em'><h2>{APP_NAME}</h2><p>"
-                    + ("Signed in – you can close this tab and go back to the app."
-                       if ok else "Sign-in was not completed – you can close this tab.")
-                    + "</p></body></html>").encode()
+            from .i18n import current
+            lang = current()
+            msg = (tr("Signed in – you can close this tab and go back to the app.")
+                   if ok else tr("Sign-in was not completed – you can close this tab."))
+            body = (f"<html lang='{html.escape(lang.locale)}' dir='{'rtl' if lang.rtl else 'ltr'}'>"
+                    f"<head><meta charset='utf-8'><title>{html.escape(APP_NAME)}</title></head>"
+                    f"<body style='font-family:sans-serif;padding:3em'><h2>{html.escape(APP_NAME)}</h2>"
+                    f"<p>{html.escape(msg)}</p></body></html>").encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -145,7 +174,7 @@ def sign_in(cfg, cancel=None, open_browser=webbrowser.open):
         "client_id": cid, "redirect_uri": redirect, "response_type": "code", "scope": SCOPE,
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state,
         "access_type": "offline", "prompt": "consent select_account"})
-    ui.info("Opening Google sign-in in the browser …")
+    ui.info(tr("Opening Google sign-in in the browser …"))
     open_browser(url)
     deadline = time.monotonic() + LOGIN_TIMEOUT
     try:
@@ -153,17 +182,18 @@ def sign_in(cfg, cancel=None, open_browser=webbrowser.open):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             if time.monotonic() > deadline:
-                raise DriveError("No sign-in within 5 minutes.")
+                raise DriveError(tr("No sign-in within 5 minutes."), "timeout")
             srv.handle_request()
     finally:
         srv.server_close()
     if not result.get("code"):
-        raise DriveError(f"Google sign-in was not completed ({result.get('error') or 'cancelled'}).")
+        raise DriveError(tr("Google sign-in was not completed (%s).",
+                              result.get("error") or tr("cancelled")), "sign_in_incomplete")
     tok = _post_form(TOKEN_URL, {"code": result["code"], "client_id": cid, "client_secret": sec,
                                  "redirect_uri": redirect, "grant_type": "authorization_code",
                                  "code_verifier": verifier})
     if "refresh_token" not in tok:
-        raise DriveError("Google did not give a lasting sign-in (no refresh token).")
+        raise DriveError(tr("Google did not give a lasting sign-in (no refresh token)."), "no_refresh_token")
     tok["expires_at"] = time.time() + int(tok.get("expires_in", 3600)) - 60
     _save_token(tok)
     acct = Drive(cfg).account()
@@ -209,9 +239,10 @@ def _post_form(url, fields):
             raw = r.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
-        raise DriveError(f"Google answered {e.code}: {e.read()[:300].decode(errors='replace')}") from None
+        raise DriveError(tr("Google answered %s: %s", e.code,
+                              e.read()[:300].decode(errors="replace")), "http") from None
     except (urllib.error.URLError, socket.timeout) as e:
-        raise DriveError(f"No connection to Google ({e}).") from None
+        raise DriveError(tr("No connection to Google (%s).", e), "offline") from None
 
 
 # ------------------------------------------------------------------------------------------ API
@@ -226,7 +257,7 @@ class Drive:
         self.transport = transport or self._urllib
         self.tok = None if transport else _load_token()
         if not transport and not (self.tok and self.tok.get("refresh_token")):
-            raise NotSignedIn("Not signed in to Google Drive.")
+            raise NotSignedIn(tr("Not signed in to Google Drive."))
 
     # --- low level
     @staticmethod
@@ -251,7 +282,7 @@ class Drive:
                                          "refresh_token": self.tok["refresh_token"],
                                          "grant_type": "refresh_token"})
             if "access_token" not in new:
-                raise NotSignedIn("Google sign-in expired – please sign in again.")
+                raise NotSignedIn(tr("Google sign-in expired – please sign in again."))
             self.tok["access_token"] = new["access_token"]
             self.tok["expires_at"] = time.time() + int(new.get("expires_in", 3600)) - 60
             _save_token(self.tok)
@@ -282,10 +313,11 @@ class Drive:
                 status == 403 and b"ateLimitExceeded" in data)
             if not retry or attempt == 6:
                 if status == 403 and b"storageQuotaExceeded" in data:
-                    raise DriveError("Google Drive is full.")
+                    raise DriveFull()
                 if status == 401:
-                    raise NotSignedIn("Google sign-in is no longer valid – please sign in again.")
-                raise DriveError(f"Google Drive error {status}: {data[:300].decode(errors='replace')}")
+                    raise NotSignedIn(tr("Google sign-in is no longer valid – please sign in again."))
+                raise DriveError(tr("Google Drive error %s: %s", status, data[:300].decode(errors="replace")),
+                                 "http")
             time.sleep(delay)
             delay = min(delay * 2, 32)
 
@@ -378,7 +410,7 @@ class Drive:
                              body=meta, headers={"X-Upload-Content-Length": str(size)}, raw=True)
         session = {k.lower(): v for k, v in rh.items()}.get("location")
         if not session:
-            raise DriveError("Google Drive did not start the upload.")
+            raise DriveError(tr("Google Drive did not start the upload."))
         h = hashlib.sha256()
         sent = 0
         result = None
@@ -401,9 +433,9 @@ class Drive:
                     result = json.loads(data)
                     break
                 if not chunk:
-                    raise DriveError("Upload incomplete.")
+                    raise DriveError(tr("Upload incomplete."))
         if sent != size:
-            raise DriveError("The file changed while it was uploaded.")
+            raise DriveError(tr("The file changed while it was uploaded."))
         return result["id"], h.hexdigest(), result.get("sha256Checksum", "")
 
     def copy(self, file_id, parent_id, name):
@@ -451,7 +483,7 @@ class Drive:
             f.flush()
             os.fsync(f.fileno())
         if got != size:
-            raise DriveError(f"Download incomplete ({got} of {size} bytes).")
+            raise DriveError(tr("Download incomplete (%s of %s bytes).", got, size))
         return h.hexdigest()
 
     def _abort(self, session):
@@ -471,12 +503,12 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
     t0 = time.monotonic()
 
     acct = drive.account()
-    ui.info(f"Google Drive: {acct['email']}")
+    ui.info(tr("Google Drive: %s", acct["email"]))
     root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
     set_id = drive.find_or_create_folder(name, root)
-    ui.info("Reading what is already on Google Drive …")
+    ui.info(tr("Reading what is already on Google Drive …"))
     remote, folders = drive.list_tree(set_id)
-    ui.info("Scanning the backup folder …")
+    ui.info(tr("Scanning the backup folder …"))
     current = scan_backup(source_parent)
     known = open_readonly_lookup(source_parent)
 
@@ -490,11 +522,13 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
         if r["size"] != sz or (k and k[0] == sz and r["sha256"] and r["sha256"] != k[1]):
             conflicts.append((rel, sz))
     total = sum(sz for _, sz in todo)
-    ui.info(f"  {len(current)} files in the backup, {len(current) - len(todo) - len(conflicts)} already "
-            f"on Google Drive, {len(todo)} to upload ({ui.human_size(total)}).")
+    ui.info("  " + trp("%d file in the backup, %d already on Google Drive, %d to upload (%s).",
+                       "%d files in the backup, %d already on Google Drive, %d to upload (%s).",
+                       len(current), len(current), len(current) - len(todo) - len(conflicts),
+                       len(todo), ui.human_size(total)))
     if todo and acct["free"] is not None and total > acct["free"]:
-        raise DriveError(f"Not enough space on Google Drive: {ui.human_size(acct['free'])} free, "
-                         f"{ui.human_size(total)} needed.")
+        raise DriveError(tr("Not enough space on Google Drive: %s free, %s needed.",
+                            ui.human_size(acct["free"]), ui.human_size(total)), "no_space")
 
     prog = ui.Progress(len(todo), total)
     rows, status, errors, warnings = [], "COMPLETED", 0, 0
@@ -535,12 +569,12 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
             return None
         except (DriveError, OSError) as e:
             st = f"ERROR: {e}"
-            if str(e) == "Google Drive is full.":
-                fatal.append("STOPPED - Google Drive is full")
+            if isinstance(e, DriveFull):
+                fatal.append(STATUS_FULL)
                 stop.set()
         finally:
             prog.end(token, done=done)
-        return [nr, fname, _category(rel), ui.human_size(sz), sz, rel, st, sha]
+        return [nr, fname, tr(_category(rel)), ui.human_size(sz), sz, rel, st, sha]
 
     with ThreadPoolExecutor(max_workers=UPLOAD_WORKERS) as pool:
         futures = [pool.submit(one, nr, rel, sz) for nr, (rel, sz) in enumerate(todo, 1)]
@@ -569,7 +603,7 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
         status = fatal[0]
     for rel, sz in conflicts:
         warnings += 1
-        rows.append(["", Path(rel).name, _category(rel), ui.human_size(sz), sz, rel,
+        rows.append(["", Path(rel).name, tr(_category(rel)), ui.human_size(sz), sz, rel,
                      "WARNING: a different file with this name is already on Google Drive - "
                      "not overwritten", ""])
     if status == "COMPLETED" and errors:
@@ -579,27 +613,34 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
     ok = status == "COMPLETED" and not warnings
     n = sum(v[0] for v in by_cat.values())
     b = sum(v[1] for v in by_cat.values())
-    verdict = (f"EVERYTHING EXPORTED CORRECTLY - {n} files ({ui.human_size(b)}) uploaded to Google "
-               f"Drive and verified with SHA-256." if ok else
-               f"ATTENTION - {status}, {errors} error(s), {warnings} warning(s)")
+    everything = ("EVERYTHING EXPORTED CORRECTLY - %d files (%s) uploaded to Google Drive and "
+                  "verified with SHA-256.")         # English says "1 files" here (tests check it)
+    from .report import both
+    verdict = (both.trp(everything, "EVERYTHING EXPORTED CORRECTLY - %d files (%s) uploaded to Google "
+                   "Drive and verified with SHA-256.", n, n, ui.human_size(b)) if ok else
+               attention(status, errors, warnings))
     sections = [
-        ("General", [("Export type", "Google Drive (mirror – only new files)"), ("Status", status),
-                     ("Google account", acct["email"]),
-                     ("Source (backup folder)", str(source_parent)),
-                     ("Target on Google Drive", f"My Drive/{ROOT_NAME}/{name}"),
-                     ("Started", f"{started:%Y-%m-%d %H:%M:%S}"),
-                     ("Duration", ui.human_duration(duration)),
-                     ("Average upload speed", f"{ui.human_size(b / duration if duration > 0 else 0)}/s")]),
-        ("Data exported", [("Total", f"{n} files, {ui.human_size(b)}")] +
-         [(c.capitalize(), f"{v[0]} files, {ui.human_size(v[1])}") for c, v in sorted(by_cat.items())] +
-         [("Files in backup", str(len(current))),
-          ("Already on Google Drive", str(len(current) - len(todo) - len(conflicts))),
-          ("Errors", str(errors)), ("Warnings", str(warnings))]),
+        (tr("General"), [(tr("Export type"), tr("Google Drive (mirror – only new files)")),
+                         (tr("Status"), tr(status)),
+                         (tr("Google account"), acct["email"]),
+                         (tr("Source (backup folder)"), str(source_parent)),
+                         (tr("Target on Google Drive"), f"My Drive/{ROOT_NAME}/{name}"),
+                         (tr("Started"), f"{started:%Y-%m-%d %H:%M:%S}"),
+                         (tr("Duration"), ui.human_duration(duration)),
+                         (tr("Average upload speed"),
+                          tr("%s/s", ui.human_size(b / duration if duration > 0 else 0)))]),
+        (tr("Data exported"), [(tr("Total"), files_size(n, b))] +
+         [(category_label(c), files_size(v[0], v[1])) for c, v in sorted(by_cat.items())] +
+         [(tr("Files in backup"), str(len(current))),
+          (tr("Already on Google Drive"), str(len(current) - len(todo) - len(conflicts))),
+          (tr("Errors"), str(errors)), (tr("Warnings"), str(warnings))]),
     ]
-    columns = ["Nr", "File", "Type", "Size", "Bytes", "Path in backup", "Status", "SHA-256"]
+    columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Path in backup"),
+               tr("Status"), tr("SHA-256")]
     rdir = Path(report_dir) if report_dir else reports_dir(name)
     base = unique_basename(rdir, f"Google Drive export {name}", started)
-    paths = write_reports(rdir, base, f"Google Drive export {name} - {started:%Y-%m-%d %H:%M}",
+    paths = write_reports(rdir, base, tr("Google Drive export %s - %s", name,
+                                         f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections, columns, rows)
     # the report also goes to Google Drive (next to the mirrored backup)
     try:
@@ -607,9 +648,31 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
         for p in paths:
             drive.upload(p, pid, p.name)
     except (DriveError, OSError, Cancelled) as e:
-        ui.warn(f"Report could not be uploaded to Google Drive: {e}")
+        ui.warn(tr("Report could not be uploaded to Google Drive: %s", e))
     (ui.ok if ok else ui.error)(verdict)
     return status, paths, verdict
+
+
+def attention(status, errors, warnings):
+    """The verdict of an export that did not go perfectly (status: the English run status)."""
+    from .report import both
+    return both.tr("ATTENTION - %s, %s, %s", both.tr(status),
+                   both.trp("%d error", "%d errors", errors, errors),
+                   both.trp("%d warning", "%d warnings", warnings, warnings))
+
+
+def files_size(n, size):
+    """'12 files, 3.4 MB' for the report."""
+    return trp("%d file, %s", "%d files, %s", n, n, ui.human_size(size))
+
+
+_CATEGORIES = (N_("photo"), N_("video"), N_("raw"), N_("other"),        # report "Type" cells
+               N_("Photo"), N_("Video"), N_("Raw"), N_("Other"))        # report row labels
+
+
+def category_label(c):
+    """Report row label of a file category ('photos' -> 'Photos' in the chosen language)."""
+    return tr(c.capitalize())
 
 
 def last_reports(set_name, limit=10):

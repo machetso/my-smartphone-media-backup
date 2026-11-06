@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .i18n import tr
 from .index import INTERNAL_DIR
 
 FILE = "phone.json"
@@ -36,7 +37,7 @@ class PhoneId:
 
     @property
     def label(self):
-        return " ".join(x for x in (self.manufacturer, self.model) if x).strip() or "unknown phone"
+        return " ".join(x for x in (self.manufacturer, self.model) if x).strip() or tr("unknown phone")
 
 
 @dataclass
@@ -84,14 +85,38 @@ def load(parent):
         return from_reports(parent)
 
 
-_SMARTPHONE = re.compile(r"^\s*Smartphone\s*:\s*(.+?)\s*$", re.M)
-_SERIAL = re.compile(r"^\s*Connection\s*:.*?\bserial ([^\s,]+)", re.M)
+def report_labels(en):
+    """A report field label in every language (reports are written in the interface language of
+    the computer that made them): regex alternatives, English first."""
+    from .i18n import languages
+    found = [en]
+    for lang in languages():
+        v = lang.texts.get(en)
+        if isinstance(v, str) and v.strip() and v not in found:
+            found.append(v.strip())
+    return "|".join(re.escape(x) for x in found)
+
+
+def _smartphone_re():
+    return re.compile(r"^\s*(?:%s)\s*:\s*(.+?)\s*$" % report_labels("Smartphone"), re.M)
+
+
+def _serial_re():
+    # the "serial" word comes from sources.AdbSource.description ("ADB (%s), serial %s, Android %s")
+    from .i18n import languages
+    tpl = [lang.texts.get("ADB (%s), serial %s, Android %s") for lang in languages()]
+    words = ["serial"] + [m.group(1) for t in tpl if isinstance(t, str)
+                          for m in [re.search(r",\s*([^,%]+?)\s+%(?:2\$)?s\s*,", t)] if m]
+    return re.compile(r"^\s*(?:%s)\s*:.*?\b(?:%s) ([^\s,]+)"
+                      % (report_labels("Connection"), "|".join(re.escape(w) for w in dict.fromkeys(words))),
+                      re.M)
 
 
 def from_reports(parent):
     """Backups made before phone.json existed: the phone from their reports (model + ADB serial
     numbers; Wi-Fi debugging 'serials' are only ip:port and are ignored)."""
     model, serials = "", []
+    smartphone_re, serial_re = _smartphone_re(), _serial_re()
     try:
         reports = sorted(Path(parent).glob("Backup *.txt"))
     except OSError:
@@ -101,9 +126,9 @@ def from_reports(parent):
             text = r.read_text(encoding="utf-8", errors="replace")[:20000]
         except OSError:
             continue
-        m = _SMARTPHONE.search(text)
+        m = smartphone_re.search(text)
         model = model or (m.group(1) if m else "")
-        for sn in _SERIAL.findall(text):
+        for sn in serial_re.findall(text):
             if ":" not in sn and sn not in serials:
                 serials.append(sn)
     return Record(model, serials, []) if (model or serials) else None
@@ -186,21 +211,25 @@ def speed_advice(pid, usb_mbit=None, on_cable=""):
     c = pid.connection
     if c == "usb-adb":
         if usb_mbit is not None and usb_mbit < 5000:
-            return False, ("USB cable with USB debugging, but only USB 2 speed (about 20–30 MB/s). "
-                           "For about 2× faster: use a USB 3 cable (often blue plugs / “SS”) and a "
-                           "USB 3 port on the computer.")
-        return True, "USB cable with USB debugging – the fastest connection (about 25–50 MB/s)."
+            return False, tr("USB cable with USB debugging, but only USB 2 speed (about 20–30 MB/s). "
+                             "For about 2× faster: use a USB 3 cable (often blue plugs / “SS”) and a "
+                             "USB 3 port on the computer.")
+        return True, tr("USB cable with USB debugging – the fastest connection (about 25–50 MB/s).")
     if on_cable and c != "usb-adb":
-        fix = (f"Faster (about 25–50 MB/s): the {on_cable} is already on the USB cable"
-               + (" (USB 3)" if usb_mbit and usb_mbit >= 5000 else "")
-               + ", only USB debugging is off – tap “Allow backup over cable” in the phone app "
-               "(or switch on USB debugging in the Developer options), then click Start again.")
+        if usb_mbit and usb_mbit >= 5000:
+            fix = tr("Faster (about 25–50 MB/s): the %s is already on the USB cable (USB 3), only USB "
+                     "debugging is off – tap “Allow backup over cable” in the phone app (or switch on "
+                     "USB debugging in the Developer options), then click Start again.", on_cable)
+        else:
+            fix = tr("Faster (about 25–50 MB/s): the %s is already on the USB cable, only USB "
+                     "debugging is off – tap “Allow backup over cable” in the phone app (or switch on "
+                     "USB debugging in the Developer options), then click Start again.", on_cable)
     else:
-        fix = ("Faster (about 25–50 MB/s): plug the phone in with a USB cable and tap “Allow backup "
-               "over cable” in the phone app (or switch on USB debugging in the Developer options).")
+        fix = tr("Faster (about 25–50 MB/s): plug the phone in with a USB cable and tap “Allow backup "
+                 "over cable” in the phone app (or switch on USB debugging in the Developer options).")
     if c in ("wifi-adb", "app-wifi"):
-        return False, "Wi-Fi – slower (about 3–30 MB/s, depends on the Wi-Fi). " + fix
+        return False, tr("Wi-Fi – slower (about 3–30 MB/s, depends on the Wi-Fi).") + " " + fix
     if c == "mtp":
-        return False, ("USB file transfer (MTP) – slower (about 10–20 MB/s) and without a check on "
-                       "the phone. " + fix)
+        return False, (tr("USB file transfer (MTP) – slower (about 10–20 MB/s) and without a check on "
+                          "the phone.") + " " + fix)
     return True, ""

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .backup import backup_parent_name, perform_backup
 from .copier import file_chunks, sha256_file
+from .i18n import N_, tr
 from .layout import OTHER_KIND, other_dir, relative_dir
 from .media import category_for
 from .sources import IMPORT_EXCLUDES, FolderSource, SourceFile, _dedupe
@@ -21,19 +22,19 @@ def check_import(source_root, backup_parents):
     """Raise ValueError if the combination makes no sense."""
     src = Path(source_root).resolve()
     if not src.is_dir():
-        raise ValueError(f"The folder to import does not exist:\n{src}")
+        raise ValueError(tr("The folder to import does not exist:\n%s", src))
     if not backup_parents:
-        raise ValueError("Choose at least one copy of the backup to import into.")
+        raise ValueError(tr("Choose at least one copy of the backup to import into."))
     names = {Path(p).name for p in backup_parents}
     if len(names) != 1:
-        raise ValueError("All chosen copies must belong to the same backup.")
+        raise ValueError(tr("All chosen copies must belong to the same backup."))
     for p in backup_parents:
         p = Path(p).resolve()
         if src == p or p in src.parents:
-            raise ValueError("The folder to import is inside the backup itself.")
+            raise ValueError(tr("The folder to import is inside the backup itself."))
         if src in p.parents:
-            raise ValueError("The folder to import contains the backup itself - choose the old "
-                             "backup folder only, not a folder above the backup.")
+            raise ValueError(tr("The folder to import contains the backup itself - choose the old "
+                                "backup folder only, not a folder above the backup."))
 
 
 def perform_import(source_root, backup_parents, cfg, interactive=True, cancel=None):
@@ -99,7 +100,7 @@ class FolderInfo:
     size: int = 0
     kind: str = OTHER   # CAMERA or OTHER (suggestion, the user can change it)
     suggested: bool = False
-    note: str = ""      # why it is (not) ticked
+    note: str = ""      # why it is (not) ticked – shown text (chosen language)
 
     @property
     def files(self):
@@ -121,16 +122,17 @@ def guess_kind(rel, info, into_existing=False):
     if into_existing:
         # adding to an existing backup: like before, every photo/video goes into the month folders
         info.kind, info.suggested = CAMERA, has_media
-        info.note = "" if has_media else "no photos/videos"
+        info.note = "" if has_media else tr("no photos/videos")
         return info
     info.kind = CAMERA if camera else OTHER
     if messenger:
-        info.suggested, info.note = False, "messenger media (often duplicates and stickers)"
+        info.suggested, info.note = False, tr("messenger media (often duplicates and stickers)")
     elif screenshots:
-        info.suggested, info.note = False, "screenshots"
+        info.suggested, info.note = False, tr("screenshots")
     else:
         info.suggested = info.files > 0
-        info.note = ("camera" if not named or "dcim" in parts else "camera (file names)") if camera else ""
+        info.note = ((tr("camera") if not named or "dcim" in parts else tr("camera (file names)"))
+                     if camera else "")
     return info
 
 
@@ -192,8 +194,8 @@ class SelectionSource:
         self.fallback_reason = None
         self.supports_phone_hash = True          # every source file is hashed separately
         self.other_files = other_files
-        self.skip_text = ("system/temporary file" if other_files
-                          else "not a photo/video file, or a system/temporary file")
+        self.skip_text = (N_("system/temporary file") if other_files      # English, shown with tr()
+                          else N_("not a photo/video file, or a system/temporary file"))
         self._info = {}
 
     def list_files(self, folders=None):
@@ -261,19 +263,20 @@ class SelectionSource:
 def check_selection(selections, backup_parents):
     """Raise ValueError if the chosen folders cannot be imported into these backup folders."""
     if not selections:
-        raise ValueError("Tick at least one folder to import.")
+        raise ValueError(tr("Tick at least one folder to import."))
     if not backup_parents:
-        raise ValueError("Choose at least one destination.")
+        raise ValueError(tr("Choose at least one destination."))
     for root in {Path(r).resolve() for r, _, _ in selections}:
         if not root.is_dir():
-            raise ValueError(f"The folder to import does not exist:\n{root}")
+            raise ValueError(tr("The folder to import does not exist:\n%s", root))
         for p in backup_parents:
             p = Path(p).resolve()
             if root == p or p in root.parents:
-                raise ValueError(f"The folder to import is inside the backup itself:\n{root}")
+                raise ValueError(tr("The folder to import is inside the backup itself:\n%s", root))
             if root in p.parents:
-                raise ValueError(f"The folder to import contains the backup itself:\n{root}\n"
-                                 "Choose the old backup folder only, not a folder above the backup.")
+                raise ValueError(tr("The folder to import contains the backup itself:\n%s\n"
+                                    "Choose the old backup folder only, not a folder above the backup.",
+                                    root))
 
 
 def perform_old_phone_import(selections, phone_name, owner, dest_bases, cfg, other_files=True,
@@ -281,7 +284,7 @@ def perform_old_phone_import(selections, phone_name, owner, dest_bases, cfg, oth
     """Import the chosen folders of an old phone as a backup of its own ('Phone - Owner')."""
     phone_name, owner = phone_name.strip(), owner.strip()
     if not phone_name or not owner:
-        raise ValueError("Enter the name of the old phone and the owner.")
+        raise ValueError(tr("Enter the name of the old phone and the owner."))
     parent_name = backup_parent_name(phone_name, owner)
     check_selection(selections, [Path(b) / parent_name for b in dest_bases])
     src = SelectionSource(selections, device_name=phone_name, other_files=other_files)
@@ -296,9 +299,9 @@ def perform_selection_import(selections, backup_parents, cfg, other_files=False,
     check_selection(selections, backup_parents)
     names = {Path(p).name for p in backup_parents}
     if len(names) != 1:
-        raise ValueError("All chosen copies must belong to the same backup.")
+        raise ValueError(tr("All chosen copies must belong to the same backup."))
     src = SelectionSource(selections, other_files=other_files)
-    label = src.roots[0].name if len(src.roots) == 1 else f"{len(src.roots)} folders"
+    label = src.roots[0].name if len(src.roots) == 1 else f"{len(src.roots)} folders"   # report file name: English
     parents = [Path(p) for p in backup_parents]
     return perform_backup(src, None, None, [""], [p.parent for p in parents], cfg,
                           interactive=interactive, cancel=cancel, parent_name=parents[0].name,
@@ -349,7 +352,7 @@ def resort_camera_files(parent, dry_run=False, cancel=None, camera_names_only=Tr
             dst.parent.mkdir(parents=True, exist_ok=True)
             os.rename(src, dst)                      # same drive: only the directory entry changes
             if dst.stat().st_size != size:
-                raise OSError(f"size changed while moving {rel}")
+                raise OSError(tr("size changed while moving %s", rel))
             db.execute("UPDATE files SET rel_path=?, category=? WHERE rel_path=?", (new_rel, cat, rel))
             if len(moves) % 200 == 0:
                 db.commit()
@@ -371,6 +374,6 @@ def resort_camera_files(parent, dry_run=False, cancel=None, camera_names_only=Tr
         log = parent / f"Resorted camera files {datetime.now():%Y-%m-%d %H-%M}.csv"
         with open(log, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f, delimiter=";")
-            w.writerow(["Old location", "New location"])
+            w.writerow([tr("Old location"), tr("New location")])
             w.writerows(moves)
     return moves

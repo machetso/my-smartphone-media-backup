@@ -19,6 +19,7 @@ import zipfile
 from pathlib import Path
 
 from . import ui
+from .i18n import tr
 
 BASE_URL = "https://dl.google.com/android/repository/platform-tools-latest-{}.zip"
 LICENSE_URL = "https://developer.android.com/tools/releases/platform-tools"
@@ -72,7 +73,7 @@ def _safe_extract(zf, target):
             continue
         dest = (target / name).resolve()
         if target not in dest.parents and dest != target:
-            raise ValueError(f"unsafe path in the download: {info.filename}")
+            raise ValueError(tr("unsafe path in the download: %s", info.filename))
         if name.endswith("/"):
             dest.mkdir(parents=True, exist_ok=True)
             continue
@@ -92,40 +93,40 @@ def download_adb(cancel=None, url=None):
     work = Path(tempfile.mkdtemp(prefix="adb-download-", dir=final.parent))
     try:
         zpath = work / "platform-tools.zip"
-        ui.info(f"Downloading the Android platform-tools from Google:\n  {url}")
+        ui.info(tr("Downloading the Android platform-tools from Google:") + f"\n  {url}")
         req = urllib.request.Request(url, headers={"User-Agent": "my-smartphone-media-backup"})
         with urllib.request.urlopen(req, timeout=60) as resp, open(zpath, "wb") as out:
             total = int(resp.headers.get("Content-Length") or 0)
             if total > MAX_SIZE:
-                raise ValueError(f"unexpected download size ({ui.human_size(total)})")
+                raise ValueError(tr("unexpected download size (%s)", ui.human_size(total)))
             prog = ui.Progress(1, total)
             done = 0
             while True:
                 if cancel is not None and cancel.is_set():
-                    raise RuntimeError("Download cancelled.")
+                    raise RuntimeError(tr("Download cancelled."))
                 chunk = resp.read(256 * 1024)
                 if not chunk:
                     break
                 out.write(chunk)
                 done += len(chunk)
                 if done > MAX_SIZE:
-                    raise ValueError("download is larger than expected - stopped")
+                    raise ValueError(tr("download is larger than expected - stopped"))
                 prog.update(add_bytes=len(chunk), current="platform-tools.zip")
             prog.update(files_done=1, force=True)
             prog.finish()
         if total and done != total:
-            raise OSError(f"incomplete download ({done} of {total} bytes)")
+            raise OSError(tr("incomplete download (%d of %d bytes)", done, total))
         if not zipfile.is_zipfile(zpath):
-            raise ValueError("the download is not a zip file")
+            raise ValueError(tr("the download is not a zip file"))
         unpack = work / "unpacked"
         with zipfile.ZipFile(zpath) as zf:
             _safe_extract(zf, unpack)
         adb = unpack / "platform-tools" / adb_exe_name()
         if not adb.is_file():
-            raise ValueError("adb was not found in the download")
+            raise ValueError(tr("%s was not found in the download", "adb"))
         version = adb_version(str(adb))
         if not version:
-            raise RuntimeError("the downloaded adb does not start on this computer")
+            raise RuntimeError(tr("the downloaded %s does not start on this computer", "adb"))
         # replace an older download only now that the new one works
         old = None
         if final.exists():
@@ -142,7 +143,7 @@ def download_adb(cancel=None, url=None):
         if old is not None:
             shutil.rmtree(old, ignore_errors=True)
         path = str(final / adb_exe_name())
-        ui.ok(f"ADB installed: {path}\n  {version}")
+        ui.ok(tr("ADB installed: %s", path) + f"\n  {version}")
         return path, version
     finally:
         shutil.rmtree(work, ignore_errors=True)

@@ -9,11 +9,12 @@ from datetime import datetime
 from pathlib import Path
 
 from . import ui
+from .i18n import N_, tr, trp
 from .copier import Cancelled, sha256_file, stream_copy
 from .index import INTERNAL_DIR, BackupIndex
 from .layout import keep_structure_placement, relative_dir, safe_name, unique_path
 from .media import CATEGORY_LABEL, category_for, detect_date
-from .report import unique_basename, write_reports
+from .report import both, shown, unique_basename, write_reports
 from .sources import PhoneHasher
 
 MIN_FREE = 50 * 1024 * 1024     # a drive with less free space than this counts as full
@@ -74,6 +75,11 @@ class FileResult:
         return any(s.startswith("OK") for s, _ in self.per_dest.values())
 
 
+def _skip_text(source, default=N_("not photo/video")):
+    """Why other files are skipped (English in the source object, shown translated)."""
+    return tr(getattr(source, "skip_text", default))
+
+
 def backup_parent_name(phone_name, owner):
     return safe_name(f"{phone_name} - {owner}")
 
@@ -81,11 +87,11 @@ def backup_parent_name(phone_name, owner):
 def _check_dest_alive(d):
     try:
         if not d.home.is_dir():
-            d.alive, d.problem = False, "drive disconnected or folder no longer reachable"
+            d.alive, d.problem = False, both.tr("drive disconnected or folder no longer reachable")
         elif shutil.disk_usage(d.home).free < MIN_FREE:
-            d.alive, d.problem = False, "drive is full"
+            d.alive, d.problem = False, both.tr("drive is full")
     except OSError as e:
-        d.alive, d.problem = False, f"drive error: {e}"
+        d.alive, d.problem = False, both.tr("drive error: %s", e)
 
 
 def _remove(path):
@@ -116,22 +122,22 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
             raise
         except Exception as e:  # noqa: BLE001
             stream_sha, n, wres = None, -1, None
-            last_err = f"reading from the source failed: {e}"
+            last_err = both.tr("reading from the source failed: %s", e)
         if stream_sha is not None and n != sf.size:
-            last_err = f"incomplete transfer ({n} of {sf.size} bytes)"
+            last_err = both.tr("incomplete transfer (%d of %d bytes)", n, sf.size)
             stream_sha = None
         if stream_sha is not None and hasher is not None:
             phone_sha = hasher.get(sf.rel)
             if phone_sha is None:
-                res.transfer_check = "n/a (source could not hash this file)"
+                res.transfer_check = both.tr("n/a (source could not hash this file)")
             elif phone_sha != stream_sha:
-                last_err = "MISMATCH between source hash and received data"
+                last_err = both.tr("MISMATCH between source hash and received data")
                 stream_sha = None
             else:
-                res.transfer_check = "OK (SHA-256 at source = received)"
+                res.transfer_check = both.tr("OK (SHA-256 at source = received)")
         elif stream_sha is not None:
-            res.transfer_check = (f"n/a ({source.kind}: no hash on the phone; "
-                                  "copies compared with the received data)")
+            res.transfer_check = both.tr("n/a (%s: no hash on the phone; copies compared with "
+                                         "the received data)", source.kind)
         if stream_sha is not None:
             break
         for t in temps:
@@ -144,18 +150,18 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
 
     if stream_sha is None:
         for d in targets:
-            res.per_dest[d.label] = (f"ERROR: {last_err}", "")
+            res.per_dest[d.label] = (both.tr("ERROR: %s", last_err), "")
             d.errors += 1
-        res.transfer_check = f"ERROR: {last_err}"
+        res.transfer_check = both.tr("ERROR: %s", last_err)
         return res
 
     res.sha = stream_sha
     good = []
     for d, w in zip(targets, wres):
         if w.error:
-            res.per_dest[d.label] = (f"ERROR: write failed ({w.error})", "")
+            res.per_dest[d.label] = (both.tr("ERROR: write failed (%s)", w.error), "")
         elif w.sha256 != stream_sha:
-            res.per_dest[d.label] = ("ERROR: verification failed (hash of written copy differs)", "")
+            res.per_dest[d.label] = (both.tr("ERROR: verification failed (hash of written copy differs)"), "")
         else:
             good.append((d, w))
             continue
@@ -176,21 +182,21 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
             if existing:
                 _remove(w.path)
                 d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, existing, cat, taken, how)
-                res.per_dest[d.label] = ("DUPLICATE: identical file already in backup", existing)
+                res.per_dest[d.label] = (both.tr("DUPLICATE: identical file already in backup"), existing)
                 continue
             final = d.parent / reldir / safe_name(sf.name)
-            status = "OK - copied and verified"
+            status = both.tr("OK - copied and verified")
             there = d.existing(final)
             if there is not None:
                 if there.stat().st_size == sf.size and sha256_file(there) == stream_sha:
                     _remove(w.path)
                     rel = final.relative_to(d.parent).as_posix()
                     d.index.add(sf.source_key, sf.size, sf.mtime, stream_sha, rel, cat, taken, how)
-                    res.per_dest[d.label] = ("DUPLICATE: identical file already in backup", rel)
+                    res.per_dest[d.label] = (both.tr("DUPLICATE: identical file already in backup"), rel)
                     continue
                 # GFS: a name is also taken when an earlier backup of the chain has it
                 final = unique_path(final, taken=lambda p: d.existing(p) is not None)
-                status = "OK - copied and verified (renamed: name already used by a different file)"
+                status = both.tr("OK - copied and verified (renamed: name already used by a different file)")
             final.parent.mkdir(parents=True, exist_ok=True)   # year/month folder only when needed
             os.replace(w.path, final)
             if sf.mtime:
@@ -207,7 +213,7 @@ def _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel=None, placemen
         except OSError as e:
             _remove(w.path)
             d.errors += 1
-            res.per_dest[d.label] = (f"ERROR: {e}", "")
+            res.per_dest[d.label] = (both.tr("ERROR: %s", e), "")
             _check_dest_alive(d)
     return res
 
@@ -216,13 +222,14 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
                    parent_name=None, mode="backup", source_label="", keep_structure=False):
     """Run one backup (or, with mode="import", an import of a folder into an existing backup).
 
-    Returns (status, report paths, file results, verdict text).
+    Returns (status, report paths, file results, verdict text). status and verdict are English
+    (the program compares them); the verdict is a report.Shown – show it with report.shown().
     """
     started = datetime.now()
     t0 = time.monotonic()
     # keep_structure: folders other than the camera folder keep their path (user request 2026-11-04)
     placement = keep_structure_placement(folders) if keep_structure else None
-    where = "in the source folder" if mode == "import" else "on the phone"
+
     parent_name = parent_name or backup_parent_name(phone_name, owner)
     from . import plans                       # backup plan per drive: simple or Grandfather-Father-Son
     dests = []
@@ -230,24 +237,27 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
         want = plans.plan_of(cfg, base)
         have = plans.folder_plan(Path(base) / parent_name)
         if have and have != want and mode != "import":
-            ui.warn(f"  Destination {i}: {plans.check_switch(base, parent_name, want)} – this backup "
-                    f"uses the plan “{plans.NAMES[have]}” of the existing folder.")
+            ui.warn("  " + tr("Destination %d: %s – this backup uses the plan “%s” of the existing "
+                              "folder.", i, plans.check_switch(base, parent_name, want),
+                              tr(plans.NAMES[have])))
         if (have or want) == plans.GFS:
-            d = plans.open_gfs(f"Destination {i}", base, parent_name, started)
+            d = plans.open_gfs(both.tr("Destination %d", i), base, parent_name, started)
         else:
             parent = Path(base) / parent_name
             parent.mkdir(parents=True, exist_ok=True)
-            d = Dest(f"Destination {i}", Path(base), parent, BackupIndex(parent))
+            d = Dest(both.tr("Destination %d", i), Path(base), parent, BackupIndex(parent))
         shutil.rmtree(d.tmp, ignore_errors=True)          # leftovers of an interrupted run
         d.tmp.mkdir(parents=True, exist_ok=True)
         dests.append(d)
     if hasattr(source, "staging"):
         source.staging = dests[0].home / INTERNAL_DIR / "staging"
 
-    ui.info(f"Reading the file list {'of the source folder' if mode == 'import' else 'from the phone'} ...")
+    ui.info(tr("Reading the file list of the source folder ...") if mode == "import"
+            else tr("Reading the file list from the phone ..."))
     files, missing = source.list_files(folders)
     for m in missing:
-        ui.warn(f"  Folder not found {where}: {m or source.root}")
+        ui.warn("  " + (tr("Folder not found in the source folder: %s", m or source.root)
+                        if mode == "import" else tr("Folder not found on the phone: %s", m or source.root)))
     supported, unsupported = [], []
     classify = getattr(source, "category_of", None) or (lambda f: category_for(f.name))
     for sf in files:
@@ -263,20 +273,29 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
             already += 1
     total_bytes = sum(sf.size for sf, _, _ in todo)
 
-    ui.info(f"  {len(supported)} photos/videos {where}, {already} already backed up, "
-            f"{len(todo)} new ({ui.human_size(total_bytes)}).")
+    if mode == "import":
+        ui.info("  " + trp("%d photo/video in the source folder, %d already backed up, %d new (%s).",
+                           "%d photos/videos in the source folder, %d already backed up, %d new (%s).",
+                           len(supported), len(supported), already, len(todo),
+                           ui.human_size(total_bytes)))
+    else:
+        ui.info("  " + trp("%d photo/video on the phone, %d already backed up, %d new (%s).",
+                           "%d photos/videos on the phone, %d already backed up, %d new (%s).",
+                           len(supported), len(supported), already, len(todo),
+                           ui.human_size(total_bytes)))
     if unsupported:
-        ui.info(f"  {len(unsupported)} other files are skipped "
-                f"({getattr(source, 'skip_text', 'not photo/video')}).")
+        ui.info("  " + trp("%d other file is skipped (%s).", "%d other files are skipped (%s).",
+                           len(unsupported), len(unsupported), _skip_text(source)))
 
     for d in dests:
         needed = sum(sf.size for sf, _, need in todo if d in need) + plans.carry_bytes(d)
         free = shutil.disk_usage(d.home).free
         if needed > free - MIN_FREE:
-            ui.warn(f"  {d.label} ({d.base}) has only {ui.human_size(free)} free, "
-                    f"needs {ui.human_size(needed)}.")
-            if interactive and not ui.ask_yes_no("  Use this drive anyway (copies until it is full)?", False):
-                d.alive, d.problem = False, "skipped: not enough free space"
+            ui.warn("  " + tr("%s (%s) has only %s free, needs %s.", shown(d.label), d.base,
+                              ui.human_size(free), ui.human_size(needed)))
+            if interactive and not ui.ask_yes_no("  " + tr("Use this drive anyway (copies until it is full)?"),
+                                                 False):
+                d.alive, d.problem = False, both.tr("skipped: not enough free space")
 
     status = "COMPLETED"
     results = []
@@ -298,13 +317,13 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
             if not targets:
                 r = FileResult(sf=sf, category=cat)
                 for d in need:
-                    r.per_dest[d.label] = (f"ERROR: destination unavailable ({d.problem})", "")
+                    r.per_dest[d.label] = (both.tr("ERROR: destination unavailable (%s)", d.problem), "")
                 results.append(r)
                 continue
             r = _copy_one(source, sf, cat, targets, hasher, cfg, prog, cancel, placement)
             for d in need:
                 if d not in targets:
-                    r.per_dest[d.label] = (f"ERROR: destination unavailable ({d.problem})", "")
+                    r.per_dest[d.label] = (both.tr("ERROR: destination unavailable (%s)", d.problem), "")
             results.append(r)
             prog.update(files_done=i, current=sf.name)
             if not any(d.alive for d in dests):
@@ -343,6 +362,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
 def _write_backup_reports(source, phone_name, owner, folders, missing, dests, results,
                           unsupported, n_supported, already, status, started, finished, duration,
                           mode="backup", source_label="", parent_name=""):
+    """Reports in the chosen language; the report FILE name, the status and the verdict's English
+    value stay English (the verdict is a report.Shown)."""
     importing = mode == "import"
     secured = [r for r in results if r.ok and r.newly_written]
     duplicates = [r for r in results if r.ok and not r.newly_written]
@@ -354,120 +375,138 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     total_n = sum(v[0] for v in by_cat.values())
     total_b = sum(v[1] for v in by_cat.values())
 
+    def files_size(n, b):
+        return trp("%d file, %s", "%d files, %s", n, n, ui.human_size(b))
+
     all_ok = status == "COMPLETED" and not failed and all(d.alive for d in dests)
     if all_ok:
-        verdict = (f"EVERYTHING COPIED CORRECTLY - {total_n} new files ({ui.human_size(total_b)}) "
-                   f"secured and verified with SHA-256 on {len(dests)} destination(s).")
+        verdict = both.trp("EVERYTHING COPIED CORRECTLY - %d new file (%s) secured and verified "
+                           "with SHA-256 on %d destination(s).",
+                           "EVERYTHING COPIED CORRECTLY - %d new files (%s) secured and verified "
+                           "with SHA-256 on %d destination(s).",
+                           total_n, total_n, ui.human_size(total_b), len(dests))
         if duplicates:
-            verdict += f" {len(duplicates)} identical duplicate(s) were recognised and not stored twice."
+            verdict = verdict + " " + both.trp(
+                "%d identical duplicate was recognised and not stored twice.",
+                "%d identical duplicates were recognised and not stored twice.",
+                len(duplicates), len(duplicates))
     else:
         problems = []
         if status != "COMPLETED":
             problems.append(status)
         if failed:
-            problems.append(f"{len(failed)} file(s) with errors (see list)")
+            problems.append(both.trp("%d file with errors (see list)", "%d files with errors (see list)",
+                                     len(failed), len(failed)))
         for d in dests:
             if not d.alive:
-                problems.append(f"{d.label}: {d.problem}")
-        verdict = "ATTENTION - " + "; ".join(problems)
+                problems.append(both.tr("%s: %s", d.label, d.problem))
+        verdict = both.tr("ATTENTION - %s", both.join("; ", problems))
 
     speed = total_b / duration if duration > 0 else 0
     if importing:
-        general = [("Imported folder", getattr(source, "folders_text", "") or str(source.root))]
+        general = [(tr("Imported folder"), getattr(source, "folders_text", "") or str(source.root))]
         if phone_name:
-            general += [("Smartphone", phone_name), ("Owner", owner)]
-        general += [("Imported into backup", parent_name),
-                    ("Import date", f"{started:%Y-%m-%d}")]
+            general += [(tr("Smartphone"), phone_name), (tr("Owner"), owner)]
+        general += [(tr("Imported into backup"), parent_name),
+                    (tr("Import date"), f"{started:%Y-%m-%d}")]
     else:
-        general = [("Smartphone", phone_name),
-                   ("Owner", owner),
-                   ("Backup date", f"{started:%Y-%m-%d}")]
+        general = [(tr("Smartphone"), phone_name),
+                   (tr("Owner"), owner),
+                   (tr("Backup date"), f"{started:%Y-%m-%d}")]
     general += [
-        ("Status", status),
-        ("Started", f"{started:%Y-%m-%d %H:%M:%S}"),
-        ("Finished", f"{finished:%Y-%m-%d %H:%M:%S}"),
-        ("Duration", ui.human_duration(duration)),
+        (tr("Status"), status),                     # English value, translated by write_reports
+        (tr("Started"), f"{started:%Y-%m-%d %H:%M:%S}"),
+        (tr("Finished"), f"{finished:%Y-%m-%d %H:%M:%S}"),
+        (tr("Duration"), ui.human_duration(duration)),
     ]
     if not importing:
-        general.append(("Connection", f"{source.kind} - {source.description}"))
+        general.append((tr("Connection"), f"{source.kind} - {source.description}"))
     if getattr(source, "fallback_reason", None):
-        general.append(("ADB fallback", f"ADB did not work ({source.fallback_reason}); "
-                                        f"{source.kind} was used instead"))
+        general.append((tr("ADB fallback"), tr("ADB did not work (%s); %s was used instead",
+                                               source.fallback_reason, source.kind)))
     if not importing:
-        general.append(("Folders on phone", ", ".join(folders)))
+        general.append((tr("Folders on phone"), ", ".join(folders)))
     if missing:
-        general.append(("Folders NOT found", ", ".join(missing)))
+        general.append((tr("Folders NOT found"), ", ".join(missing)))
 
     data = [
-        ("Total secured this run", f"{total_n} files, {ui.human_size(total_b)} ({total_b:,} bytes)"),
-        ("Photos", f"{by_cat['photo'][0]} files, {ui.human_size(by_cat['photo'][1])}"),
-        ("Videos", f"{by_cat['video'][0]} files, {ui.human_size(by_cat['video'][1])}"),
-        ("RAW", f"{by_cat['raw'][0]} files, {ui.human_size(by_cat['raw'][1])}"),
+        (tr("Total secured this run"), tr("%s (%s bytes)", files_size(total_n, total_b), f"{total_b:,}")),
+        (tr("Photos"), files_size(*by_cat["photo"])),
+        (tr("Videos"), files_size(*by_cat["video"])),
+        (tr("RAW"), files_size(*by_cat["raw"])),
     ] + [
-        (CATEGORY_LABEL[c] + " (other/)", f"{by_cat[c][0]} files, {ui.human_size(by_cat[c][1])}")
+        (tr("%s (other/)", tr(CATEGORY_LABEL[c])), files_size(*by_cat[c]))
         for c in ("other-photo", "other-video", "other-file") if by_cat[c][0]
     ] + [
-        ("Average speed", f"{ui.human_size(speed)}/s"),
-        ("Photos/videos found " + ("in the source" if importing else "on phone"), str(n_supported)),
-        ("Already backed up before (skipped)", str(already)),
-        ("Identical duplicates (not stored twice)", str(len(duplicates))),
-        ("Files with errors", str(len(failed))),
-        (f"Other files skipped ({getattr(source, 'skip_text', 'not photo/video')})", str(len(unsupported))),
+        (tr("Average speed"), tr("%s/s", ui.human_size(speed))),
+        (tr("Photos/videos found in the source") if importing else tr("Photos/videos found on phone"),
+         str(n_supported)),
+        (tr("Already backed up before (skipped)"), str(already)),
+        (tr("Identical duplicates (not stored twice)"), str(len(duplicates))),
+        (tr("Files with errors"), str(len(failed))),
+        (tr("Other files skipped (%s)", _skip_text(source)), str(len(unsupported))),
     ]
     dest_items = []
     for d in dests:
-        state = "OK" if d.alive else f"PROBLEM: {d.problem}"
+        state = both.tr("OK") if d.alive else both.tr("PROBLEM: %s", d.problem)
         tot = d.index.totals()
-        content = ", ".join(f"{CATEGORY_LABEL.get(c, c)}: {n} files / {ui.human_size(b)}"
+        content = ", ".join(tr("%s: %d files / %s", tr(CATEGORY_LABEL.get(c, c)), n, ui.human_size(b))
                             for c, (n, b) in sorted(tot.items()))
-        dest_items += [(f"{d.label}", str(d.parent)),
-                       (f"{d.label} backup plan", d.describe() if hasattr(d, "describe") else
-                        "Simple – one folder, only new files are added"),
-                       (f"{d.label} state", state),
-                       (f"{d.label} this run", f"{d.written} files written, {ui.human_size(d.written_bytes)}, "
-                                               f"{d.errors} errors"),
-                       (f"{d.label} whole backup", content or "empty")]
+        label = shown(d.label)
+        dest_items += [(label, str(d.parent)),
+                       (tr("%s backup plan", label), d.describe() if hasattr(d, "describe") else
+                        tr("Simple – one folder, only new files are added")),
+                       (tr("%s state", label), state),
+                       (tr("%s this run", label),
+                        tr("%d files written, %s, %d errors", d.written, ui.human_size(d.written_bytes),
+                           d.errors)),
+                       (tr("%s whole backup", label), content or tr("empty"))]
         if getattr(d, "carried", 0):
-            dest_items.append((f"{d.label} earlier files in this {d.mode} backup",
-                               f"{d.carried} files, {ui.human_size(d.carried_bytes)} (copied on the drive)"))
-    method = [("Source -> computer" if importing else "Phone -> computer",
-               ("SHA-256 of every source file calculated separately and compared with the copied data"
-                if importing else "SHA-256 calculated on the phone and compared with the received data")
-               if source.supports_phone_hash else
-               f"{source.kind}: SHA-256 of the received data (no hash possible on the phone "
-               "with this connection)"),
-              ("Computer -> drive", "every copy is flushed to disk, read back and its SHA-256 compared"),
-              ("Interrupted copies", "files are written as temporary files and only renamed after a "
-                                     "successful check - there are no half-copied files")]
-    sections = [("General", general), ("Data secured", data), ("Destinations", dest_items),
-                ("Verification method", method)]
+            from .gfs import mode_name
+            dest_items.append((tr("%s earlier files in this %s backup", label, mode_name(d.mode)),
+                               tr("%d files, %s (copied on the drive)", d.carried,
+                                  ui.human_size(d.carried_bytes))))
+    if source.supports_phone_hash:
+        how = (tr("SHA-256 of every source file calculated separately and compared with the copied data")
+               if importing else tr("SHA-256 calculated on the phone and compared with the received data"))
+    else:
+        how = tr("%s: SHA-256 of the received data (no hash possible on the phone with this connection)",
+                 source.kind)
+    method = [(tr("Source -> computer") if importing else tr("Phone -> computer"), how),
+              (tr("Computer -> drive"), tr("every copy is flushed to disk, read back and its SHA-256 compared")),
+              (tr("Interrupted copies"), tr("files are written as temporary files and only renamed after a "
+                                            "successful check - there are no half-copied files"))]
+    sections = [(tr("General"), general), (tr("Data secured"), data), (tr("Destinations"), dest_items),
+                (tr("Verification method"), method)]
 
-    columns = ["Nr", "File", "Type", "Size", "Bytes", "Date taken", "Date from",
-               "Path in source" if importing else "Phone path",
-               "Transfer check", "SHA-256"]
+    columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Date taken"), tr("Date from"),
+               tr("Path in source") if importing else tr("Phone path"),
+               tr("Transfer check"), tr("SHA-256")]
     for d in dests:
-        columns += [f"{d.label} status", f"{d.label} location"]
+        columns += [tr("%s status", shown(d.label)), tr("%s location", shown(d.label))]
+    not_needed = both.tr("not needed (already backed up on this drive)")
     rows = []
     for i, r in enumerate(results, 1):
-        row = [i, r.sf.name, CATEGORY_LABEL[r.category], ui.human_size(r.sf.size), r.sf.size,
-               f"{r.taken:%Y-%m-%d %H:%M:%S}" if r.taken else "", r.date_source, r.sf.rel,
-               r.transfer_check, r.sha]
+        row = [i, r.sf.name, tr(CATEGORY_LABEL[r.category]), ui.human_size(r.sf.size), r.sf.size,
+               f"{r.taken:%Y-%m-%d %H:%M:%S}" if r.taken else "", tr(r.date_source) if r.date_source else "",
+               r.sf.rel, r.transfer_check, r.sha]
         for d in dests:
-            st, loc = r.per_dest.get(d.label, ("not needed (already backed up on this drive)", ""))
+            st, loc = r.per_dest.get(d.label, (not_needed, ""))
             row += [st, loc]
         rows.append(row)
     n = len(rows)
+    skipped = both.tr("skipped (%s)", tr(getattr(source, "skip_text", N_("not a photo/video file"))))
     for sf, _ in unsupported:
         n += 1
-        rows.append([n, sf.name, "other", ui.human_size(sf.size), sf.size, "", "", sf.rel,
-                     "", ""] + [f"skipped ({getattr(source, 'skip_text', 'not a photo/video file')})",
-                                ""] * len(dests))
+        rows.append([n, sf.name, tr("other"), ui.human_size(sf.size), sf.size, "", "", sf.rel,
+                     "", ""] + [skipped, ""] * len(dests))
 
+    # the report FILE names stay English (report_base); the title inside is translated
     if importing:
-        title = f"Import {source_label} into {parent_name} - {started:%Y-%m-%d %H:%M}"
+        title = tr("Import %s into %s - %s", source_label, parent_name, f"{started:%Y-%m-%d %H:%M}")
         report_base = f"Import {source_label}"
     else:
-        title = f"Backup {phone_name} - {owner} - {started:%Y-%m-%d %H:%M}"
+        title = tr("Backup %s - %s - %s", phone_name, owner, f"{started:%Y-%m-%d %H:%M}")
         report_base = f"Backup {phone_name} {owner}"
     paths = []
     basename = None
@@ -478,7 +517,7 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
                 basename = unique_basename(rdir, report_base, started)
             paths += write_reports(rdir, basename, title, all_ok, verdict, sections, columns, rows)
         except OSError as e:
-            ui.error(f"Could not write report to {rdir}: {e}")
+            ui.error(tr("Could not write report to %s: %s", rdir, e))
     if all_ok:
         ui.ok(verdict)
     else:

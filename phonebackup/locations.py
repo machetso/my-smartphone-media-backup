@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .export import has_catalog
+from .i18n import tr
 from .index import INTERNAL_DIR
 
 
@@ -132,7 +133,7 @@ def mount_device(device):
     import re
     import subprocess
     if not shutil.which("udisksctl"):
-        return None, "udisksctl is not installed"
+        return None, tr("%s is not installed", "udisksctl")
     try:
         r = subprocess.run(["udisksctl", "mount", "-b", device, "--no-user-interaction"],
                            capture_output=True, timeout=90)
@@ -145,7 +146,7 @@ def mount_device(device):
     m = re.search(r"already mounted at [`'\"]?(.+?)[`'\"]?\.?$", text, re.M)
     if m:
         return m.group(1).strip(), None
-    return None, text or f"udisksctl exit code {r.returncode}"
+    return None, text or tr("%s exit code %d", "udisksctl", r.returncode)
 
 
 def drive_label_of(path):
@@ -159,7 +160,13 @@ def drive_label_of(path):
 
 
 def mount_for_paths(paths):
-    """Mount unmounted drives whose label matches saved folders. Returns list of messages."""
+    """Mount unmounted drives whose label matches saved folders. Returns list of messages
+    (in the interface language; use mount_for_paths_status to know which ones worked)."""
+    return [m for _ok, m in mount_for_paths_status(paths)]
+
+
+def mount_for_paths_status(paths):
+    """Like mount_for_paths, but [(ok, message)] - success decided without parsing the text."""
     msgs = []
     missing = [p for p in paths if not os.path.isdir(p)]
     if not missing:
@@ -170,8 +177,8 @@ def mount_for_paths(paths):
         for d in unmounted:
             if label and d["label"] == label:
                 mp, err = mount_device(d["device"])
-                msgs.append(f"Mounted drive '{label}' at {mp}" if mp else
-                            f"Could not mount drive '{label}': {err}")
+                msgs.append((True, tr("Mounted drive '%s' at %s", label, mp)) if mp else
+                            (False, tr("Could not mount drive '%s': %s", label, err)))
                 break
     return msgs
 

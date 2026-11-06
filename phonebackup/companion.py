@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import config
+from .i18n import tr, N_
 from .copier import CHUNK
 from .sources import SourceFile, _dedupe, _run
 
@@ -44,57 +45,75 @@ DEFAULT_PORT = 47823
 SETUP_PORT = 47824
 
 
+# headings in install_question's details – the GUI shows them in bold (match tr(heading))
+INSTALL_HEADINGS = (N_("What exactly happens now:"), N_("What the app does:"),
+                    N_("What it cannot do:"), N_("Remove it at any time"))
+
+
 def install_question(state, phone, serial, installed_version, apk_size):
     """(title, text, details) shown BEFORE the phone app is installed / updated / given its right
-    over the cable – the user decides every time (user request 2026-11-05)."""
+    over the cable – the user decides every time (user request 2026-11-05). In the interface
+    language; the headings of INSTALL_HEADINGS appear in `details` as tr(heading)."""
     from html import escape
-    mb = f"{apk_size / 1e6:.1f} MB"
-    who = f"<b>{escape(phone)}</b> (serial number {escape(serial)}), connected by USB cable"
+    mb = tr("%.1f MB", apk_size / 1e6)
+    who = tr("%s (serial number %s), connected by USB cable",
+             f"<b>{escape(phone)}</b>", escape(serial))
+    app = f"<b>“{APP_NAME}”</b>"
     if state == "outdated":
-        title = "Update the app on the phone?"
-        head = (f"This program wants to <b>update</b> the app <b>“{APP_NAME}”</b> on {who} – from "
-                f"version {escape(installed_version or 'older')} to <b>{APP_VERSION_NAME}</b>.")
-        why = ("The version on the phone is older than the one included in this program. The "
-               "newer version is needed so that phone and computer understand each other and all "
-               "safety switch-offs work.")
+        title = tr("Update the app on the phone?")
+        head = tr("This program wants to <b>update</b> the app %s on %s – from "
+                  "version %s to %s.", app, who, escape(installed_version or tr("older")),
+                  f"<b>{APP_VERSION_NAME}</b>")
+        why = tr("The version on the phone is older than the one included in this program. The "
+                 "newer version is needed so that phone and computer understand each other and all "
+                 "safety switch-offs work.")
     elif state == "no-permission":
-        title = "Give the app on the phone a right?"
-        head = (f"The app <b>“{APP_NAME}”</b> is already on {who}, but it may not switch USB "
-                f"debugging yet. This program wants to install version <b>{APP_VERSION_NAME}</b> "
-                "over it and give it that right.")
-        why = ("So that you do not need the Developer options any more: the app switches USB "
-               "debugging on only for a backup, and it is switched off again afterwards.")
+        title = tr("Give the app on the phone a right?")
+        head = tr("The app %s is already on %s, but it may not switch USB "
+                  "debugging yet. This program wants to install version %s "
+                  "over it and give it that right.", app, who, f"<b>{APP_VERSION_NAME}</b>")
+        why = tr("So that you do not need the Developer options any more: the app switches USB "
+                 "debugging on only for a backup, and it is switched off again afterwards.")
     else:
-        title = "Install an app on the phone?"
-        head = (f"This program wants to <b>install</b> the app <b>“{APP_NAME}”</b> (version "
-                f"{APP_VERSION_NAME}) on {who}.")
-        why = ("So that you do not need the Developer options any more: the app switches USB "
-               "debugging on only for a backup, and it is switched off again afterwards. It also "
-               "lets you back up over Wi-Fi without USB debugging.")
-    text = f"{head}<br><br><b>Why:</b> {why}"
+        title = tr("Install an app on the phone?")
+        head = tr("This program wants to <b>install</b> the app %s (version "
+                  "%s) on %s.", app, APP_VERSION_NAME, who)
+        why = tr("So that you do not need the Developer options any more: the app switches USB "
+                 "debugging on only for a backup, and it is switched off again afterwards. It also "
+                 "lets you back up over Wi-Fi without USB debugging.")
+    text = f"{head}<br><br><b>{tr('Why:')}</b> {why}"
+    happens, does, cannot, remove = (tr(h) for h in INSTALL_HEADINGS)
     details = (
-        "What exactly happens now:\n"
-        f"1. The file MediaBackup.apk ({mb}) is installed on the phone (adb install). It is part of "
-        "this program – nothing is downloaded from the internet.\n"
-        "2. The app gets the special right “WRITE_SECURE_SETTINGS” (pm grant). It is needed to "
-        "switch USB debugging on and off and can only be given over the cable.\n"
-        "3. The app is opened on the phone; the first time you pair it with this computer (tap "
-        "“Pair” on the phone).\n\n"
-        "What the app does: it switches USB debugging on only when you tap “Allow backup over "
-        "cable”, and off again after the backup – automatically after 5 minutes without a backup, "
-        "2 minutes without contact to the computer, and after a restart. It reads photos and "
-        "videos only after you allow it on the phone, and sends them only to the paired computer "
-        "in your own Wi-Fi or over the cable (encrypted).\n"
-        "What it cannot do: delete or change photos, read other files, contacts or messages; it "
-        "contacts no server on the internet, has no ads and no tracking.\n\n"
-        "Remove it at any time on the phone: Settings → Apps → My Media Backup → Uninstall.\n\n"
-        "Nothing is installed if you choose “Not now” – the backup still works with USB debugging "
-        "switched on by hand.")
+        happens + "\n"
+        + tr("1. The file %s (%s) is installed on the phone (adb install). It is part of "
+             "this program – nothing is downloaded from the internet.", "MediaBackup.apk", mb) + "\n"
+        + tr("2. The app gets the special right “%s” (pm grant). It is needed to "
+             "switch USB debugging on and off and can only be given over the cable.",
+             "WRITE_SECURE_SETTINGS") + "\n"
+        + tr("3. The app is opened on the phone; the first time you pair it with this computer (tap "
+             "“Pair” on the phone).") + "\n\n"
+        + does + " "
+        + tr("it switches USB debugging on only when you tap “Allow backup over "
+             "cable”, and off again after the backup – automatically after 5 minutes without a backup, "
+             "2 minutes without contact to the computer, and after a restart. It reads photos and "
+             "videos only after you allow it on the phone, and sends them only to the paired computer "
+             "in your own Wi-Fi or over the cable (encrypted).") + "\n"
+        + cannot + " "
+        + tr("delete or change photos, read other files, contacts or messages; it "
+             "contacts no server on the internet, has no ads and no tracking.") + "\n\n"
+        + tr("%s on the phone: Settings → Apps → %s → Uninstall.", remove, APP_NAME) + "\n\n"
+        + tr("Nothing is installed if you choose “%s” – the backup still works with USB debugging "
+             "switched on by hand.", tr("Not now")))
     return title, text, details
 
 
 class CompanionError(Exception):
-    pass
+    """status: the phone's HTTP status if it answered with an error (compare that, never the
+    message - it is in the interface language)."""
+
+    def __init__(self, message="", status=None):
+        super().__init__(message)
+        self.status = status
 
 
 # =========================================================================== helpers
@@ -344,8 +363,8 @@ class Client:
             der = c.sock.getpeercert(binary_form=True)
             if hashlib.sha256(der).hexdigest() != self.fingerprint:
                 c.close()
-                raise CompanionError("the phone's certificate does not match the paired phone "
-                                     "(different phone or manipulated connection) - refused")
+                raise CompanionError(tr("the phone's certificate does not match the paired phone "
+                                        "(different phone or manipulated connection) - refused"))
             self._local.conn = c
         return c
 
@@ -373,7 +392,7 @@ class Client:
             payload = None
         if not 200 <= resp.status < 300:
             msg = payload.get("error") if isinstance(payload, dict) else raw[:200]
-            raise CompanionError(f"phone answered {resp.status}: {msg}")
+            raise CompanionError(tr("phone answered %d: %s", resp.status, msg), status=resp.status)
         return payload
 
     def close(self):
@@ -477,7 +496,7 @@ class Prefetcher:
 
 class CompanionSource:
     supports_phone_hash = True
-    kind = "Phone app (Wi-Fi)"
+    kind = N_("Phone app (Wi-Fi)")       # stays English (data); shown with tr(src.kind)
 
     def __init__(self, entry, address):
         self.entry = entry
@@ -494,8 +513,8 @@ class CompanionSource:
 
     @property
     def description(self):
-        return (f"Phone app 'My Media Backup' {self.app_version} over Wi-Fi ({self.address}, TLS, "
-                f"read-only), Android {self.android}")
+        return tr("Phone app '%s' %s over Wi-Fi (%s, TLS, read-only), Android %s",
+                  APP_NAME, self.app_version, self.address, self.android)
 
     def is_connected(self):
         try:
@@ -538,7 +557,7 @@ class CompanionSource:
         for b in self._stream(sf):
             data += b
         if len(data) != sf.size:
-            raise CompanionError(f"incomplete: {sf.rel}")
+            raise CompanionError(tr("incomplete: %s", sf.rel))
         return bytes(data)
 
     def open_stream(self, sf):
@@ -553,7 +572,7 @@ class CompanionSource:
         q = urllib.parse.urlencode({"rel": sf.rel})
         resp = self.client.request("GET", "/file?" + q, stream=True)
         if not hasattr(resp, "read"):
-            raise CompanionError(f"could not read {sf.rel}")
+            raise CompanionError(tr("could not read %s", sf.rel))
         ok = False
         try:
             while True:
@@ -632,10 +651,10 @@ def link_over_cable(adb_source, cfg):
     Needs the phone app in backup mode (it runs after 'Allow backup over cable')."""
     entries = phones(cfg)
     if not entries:
-        return None, "no phone paired with the phone app yet"
+        return None, tr("no phone paired with the phone app yet")
     port = adb_source.forward(DEFAULT_PORT)
     if not port:
-        return None, "port forwarding over the cable failed"
+        return None, tr("port forwarding over the cable failed")
     for e in entries:                 # the secret is only sent after the certificate matched
         c = Client(f"127.0.0.1:{port}", e["fingerprint"], e["secret"], timeout=10)
         try:
@@ -646,7 +665,7 @@ def link_over_cable(adb_source, cfg):
             c.close()
         return CableLink(adb_source, e, port), None
     adb_source.unforward(port)
-    return None, "the phone app is not in backup mode, or this phone is not paired"
+    return None, tr("the phone app is not in backup mode, or this phone is not paired")
 
 
 def fingerprint_over_cable(adb_source):
@@ -673,7 +692,7 @@ def pair_over_cable(adb_source, cfg, wait_s=180, cancel=None, on_code=None):
     shows a different code (security review 2026-11-06). Returns the new phone entry."""
     port, fp = fingerprint_over_cable(adb_source)
     if not port:
-        raise CompanionError("the phone app does not answer over the cable (is it open?)")
+        raise CompanionError(tr("the phone app does not answer over the cable (is it open?)"))
     pc_id, pc_name = pc_identity(cfg)
     nonce = secrets.token_hex(16)
     code = pairing_code(nonce, fp)
@@ -685,7 +704,7 @@ def pair_over_cable(adb_source, cfg, wait_s=180, cancel=None, on_code=None):
         deadline = time.monotonic() + wait_s
         while time.monotonic() < deadline:
             if cancel is not None and cancel.is_set():
-                raise CompanionError("cancelled")
+                raise CompanionError(tr("cancelled"))
             res = c.request("POST", "/usbpair/claim", {"pc_id": pc_id})
             if isinstance(res, dict) and res.get("secret"):
                 entry = {"phone_id": res.get("phone_id"), "name": adb_source.device_name,
@@ -694,7 +713,7 @@ def pair_over_cable(adb_source, cfg, wait_s=180, cancel=None, on_code=None):
                 save_phone(cfg, entry)
                 return entry
             time.sleep(1)
-        raise CompanionError("not confirmed on the phone in time")
+        raise CompanionError(tr("not confirmed on the phone in time"))
     finally:
         c.close()
         adb_source.unforward(port)
@@ -704,11 +723,11 @@ def connect_companion(cfg):
     """(CompanionSource, None) or (None, reason)."""
     entry, addr = find_phone(cfg)
     if not entry:
-        return None, "no paired phone with the app in backup mode was found"
+        return None, tr("no paired phone with the app in backup mode was found")
     try:
         src = CompanionSource(entry, addr)
     except (OSError, CompanionError, http.client.HTTPException) as e:
-        return None, f"phone app error: {e}"
+        return None, tr("phone app error: %s", e)
     if entry.get("address") != addr:
         entry["address"] = addr
         save_phone(cfg, entry)
@@ -831,7 +850,7 @@ class SetupServer:
             except OSError as e:
                 last = e
         if self.httpd is None:
-            raise CompanionError(f"could not open the setup server: {last}")
+            raise CompanionError(tr("could not open the setup server: %s", last))
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -843,11 +862,16 @@ class SetupServer:
             self.httpd = None
 
     def page(self):
-        apk_link = (f"<a class='btn' href='/s/{self.token}/MediaBackup.apk'>1. Download the app</a>"
-                    if self.apk else "<p class='warn'>The app file is missing in this program.</p>")
-        return f"""<!doctype html><html><head><meta charset="utf-8">
+        """The setup page shown in the PHONE's browser - in the interface language of this
+        computer (the user reads it on the phone next to the program)."""
+        from .i18n import current
+        e = html.escape
+        lang = current()
+        apk_link = (f"<a class='btn' href='/s/{self.token}/MediaBackup.apk'>{e(tr('1. Download the app'))}</a>"
+                    if self.apk else f"<p class='warn'>{e(tr('The app file is missing in this program.'))}</p>")
+        return f"""<!doctype html><html lang="{e(lang.locale)}" dir="{'rtl' if lang.rtl else 'ltr'}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Media Backup – set up</title>
+<title>{e(tr("%s – set up", APP_NAME))}</title>
 <style>
 body{{font-family:sans-serif;margin:0;padding:20px;max-width:560px;background:#fff;color:#222}}
 @media (prefers-color-scheme:dark){{body{{background:#121212;color:#eee}}}}
@@ -855,15 +879,15 @@ body{{font-family:sans-serif;margin:0;padding:20px;max-width:560px;background:#f
 color:#fff;text-decoration:none;font-size:18px;font-weight:600}}
 .btn2{{background:#1f8a4c}} small{{color:#888}} .warn{{color:#c62828}}
 </style></head><body>
-<h2>My Media Backup for {html.escape(self.pc_name)}</h2>
-<p>This app lets the computer back up your photos and videos. It can only <b>read</b> photos and
-videos – nothing else, and it cannot delete or change anything.</p>
+<h2>{tr("%s for %s", e(APP_NAME), e(self.pc_name))}</h2>
+<p>{tr("This app lets the computer back up your photos and videos. It can only <b>read</b> photos and "
+       "videos – nothing else, and it cannot delete or change anything.")}</p>
 {apk_link}
-<small>Then open the downloaded file and tap <i>Install</i>. Android may ask once to allow
-installing apps from your browser.</small>
-<a class="btn btn2" href="{html.escape(self.intent_url())}">2. Connect app with this computer</a>
-<small>Already installed? Just tap step 2. The phone and the computer then show the same 6-digit
-code – confirm it on the phone AND on the computer.</small>
+<small>{tr("Then open the downloaded file and tap <i>Install</i>. Android may ask once to allow "
+           "installing apps from your browser.")}</small>
+<a class="btn btn2" href="{e(self.intent_url())}">{e(tr("2. Connect app with this computer"))}</a>
+<small>{tr("Already installed? Just tap step 2. The phone and the computer then show the same 6-digit "
+           "code – confirm it on the phone AND on the computer.")}</small>
 </body></html>"""
 
     def claim(self, req, cancel=None, wait=180):
@@ -877,9 +901,10 @@ code – confirm it on the phone AND on the computer.</small>
                 res = c.request("POST", "/claim", {"token": req.token})
                 break
             except CompanionError as e:
-                if "409" not in str(e) or time.monotonic() > deadline or (cancel and cancel.is_set()):
-                    if "409" in str(e):
-                        raise CompanionError("the pairing was not confirmed on the phone") from e
+                wait_more = e.status == 409       # the phone: "wait" (not confirmed there yet)
+                if not wait_more or time.monotonic() > deadline or (cancel and cancel.is_set()):
+                    if wait_more:
+                        raise CompanionError(tr("the pairing was not confirmed on the phone")) from e
                     raise
             finally:
                 c.close()

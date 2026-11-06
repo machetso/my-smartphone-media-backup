@@ -24,6 +24,9 @@ import shutil
 import subprocess
 import sys
 
+from .i18n import tr
+
+# sent to the operating system (logind / D-Bus / Windows), not translated
 WHY = "My Smartphone Media Backup is copying files - do not sleep or shut down"
 WHO = "My Smartphone Media Backup"
 
@@ -40,7 +43,7 @@ class KeepAwake:
         self.what = what
         self.enabled = enabled
         self.active = False
-        self.how = "disabled in the settings"
+        self.how = tr("disabled in the settings")
         self._proc = None
         self._idle = []           # held desktop idle inhibits: (uninhibit function, objects to keep)
 
@@ -53,10 +56,10 @@ class KeepAwake:
                 elif sys.platform.startswith("linux"):
                     self._start_linux()
                 else:
-                    self.how = "not supported on this system"
+                    self.how = tr("not supported on this system")
             except Exception as e:  # noqa: BLE001 - never let this stop a backup
                 self.active = False
-                self.how = f"not possible ({e})"
+                self.how = tr("not possible (%s)", e)
         return self
 
     def __exit__(self, *exc):
@@ -84,8 +87,11 @@ class KeepAwake:
 
     def message(self):
         if self.active:
-            return f"Standby/shutdown blocked while the {self.what.lower()} runs ({self.how})."
-        return f"Could not keep the computer awake: {self.how}. Make sure it does not go to standby."
+            what = tr(self.what)                       # "Backup", "Export", … (English keys)
+            what = what.lower() if what == self.what else what   # English: "while the backup runs"
+            return tr("Standby/shutdown blocked while the %s runs (%s).", what, self.how)
+        return tr("Could not keep the computer awake: %s. Make sure it does not go to standby.",
+                  self.how)
 
     # ------------------------------------------------------------------ platforms
     def _start_windows(self):
@@ -97,21 +103,21 @@ class KeepAwake:
             if not ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED):
                 raise OSError("SetThreadExecutionState failed")
         self.active = True
-        self.how = "Windows sleep timer paused"
+        self.how = tr("Windows sleep timer paused")
 
     def _start_linux(self):
         idle = self._inhibit_desktop_idle()
         self._start_logind()
         if idle:
-            self.how = (self.how + "; " if self.active else "") + f"desktop idle timer paused ({idle})"
+            self.how = (self.how + "; " if self.active else "") + tr("desktop idle timer paused (%s)", idle)
             self.active = True
         elif self.active:
-            self.how += "; desktop idle timer NOT paused (no D-Bus idle inhibit available)"
+            self.how += "; " + tr("desktop idle timer NOT paused (no D-Bus idle inhibit available)")
 
     def _start_logind(self):
         exe = shutil.which("systemd-inhibit")
         if not exe:
-            self.how = "systemd-inhibit not found"
+            self.how = tr("%s not found", "systemd-inhibit")
             return
         # Try the full set first; fall back to sleep/idle only if the system refuses some of it.
         for what in ("sleep:idle:handle-lid-switch:shutdown", "sleep:idle"):
@@ -126,12 +132,12 @@ class KeepAwake:
             except subprocess.TimeoutExpired:
                 self._proc = proc
                 self.active = True
-                parts = {"sleep": "standby", "idle": "idle suspend",
-                         "handle-lid-switch": "lid close", "shutdown": "shutdown"}
-                self.how = "blocked: " + ", ".join(parts[p] for p in what.split(":"))
+                parts = {"sleep": tr("standby"), "idle": tr("idle suspend"),
+                         "handle-lid-switch": tr("lid close"), "shutdown": tr("shutdown")}
+                self.how = tr("blocked: %s", ", ".join(parts[p] for p in what.split(":")))
                 return
             err = (proc.stderr.read() or b"").decode(errors="replace").strip()
-            self.how = err or f"systemd-inhibit exited with code {proc.returncode}"
+            self.how = err or tr("%s exited with code %d", "systemd-inhibit", proc.returncode)
 
 
     # ---- desktop idle timer (D-Bus session bus)
