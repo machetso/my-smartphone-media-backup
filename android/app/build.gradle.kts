@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.machetso.mediabackup"
         minSdk = 30          // Android 11 - same as wireless debugging
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.3.3"
+        versionCode = 7
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

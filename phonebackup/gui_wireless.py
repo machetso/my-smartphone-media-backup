@@ -222,7 +222,7 @@ class WifiPairDialog(QDialog):
         self.pair_btn.setEnabled(True)
         if ok and addr:
             self.connected_address = addr
-            wireless.remember(self.cfg, addr)
+            wireless.remember(self.cfg, addr, self.adb)
             self.status.setText(_status_html(msg, GREEN))
             QTimer.singleShot(900, self.accept)
             return
@@ -439,7 +439,7 @@ class PhoneAppDialog(QDialog):
         if req is None:
             return
         self.ok_btn.setEnabled(False)
-        self.status.setText(_status_html("Pairing …", GRAY))
+        self.status.setText(_status_html("Now tap “Same code – Pair” on the phone too …", GRAY))
 
         def run():
             try:

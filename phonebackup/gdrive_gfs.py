@@ -51,6 +51,7 @@ from .gdrive import (FOLDER_MIME, ROOT_NAME, UPLOAD_WORKERS, Drive, DriveError, 
                      _q, API)
 from .index import open_readonly_lookup
 from .report import unique_basename, write_reports
+from .safety import inside, safe_component, safe_rel, valid_run_folder
 
 SUFFIX = " (Grandfather-Father-Son)"
 CAT_REL = f"{EXPORT_DIR}/catalog.sqlite"
@@ -63,6 +64,8 @@ def folder_name(set_name):
 
 def local_dir(set_name) -> Path:
     from .adbdownload import data_dir
+    if safe_component(set_name) is None:          # a folder name from Google Drive: untrusted
+        raise DriveError(f"Unusable backup name on Google Drive: {set_name!r}")
     return Path(data_dir()) / "gdrive-gfs" / set_name
 
 
@@ -98,6 +101,7 @@ class DriveSet:
         r = self.remote.get(CAT_REL)
         if r:                                        # Google Drive's catalog is the reference
             drive.download(r["id"], cat_file, r["size"])
+            _check_catalog(cat_file)
 
     def catalog(self):
         return Catalog(self.local)
@@ -159,6 +163,25 @@ class DriveSet:
         return sum(v["size"] for k, v in self.remote.items() if k.startswith(pre) and "target" not in v)
 
 
+def _check_catalog(path):
+    """The catalog comes from Google Drive: it must be an intact SQLite file with the expected
+    tables, nothing else (no triggers / views that could run code-like SQL)."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            db.execute("PRAGMA trusted_schema=OFF")
+            ok = db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            kinds = {(t, n) for t, n in db.execute("SELECT type, name FROM sqlite_master")}
+        finally:
+            db.close()
+    except sqlite3.Error as e:
+        raise DriveError(f"The catalog on Google Drive is damaged: {e}") from e
+    if not ok or any(t in ("trigger", "view") for t, _ in kinds) or not {
+            ("table", "runs"), ("table", "files")} <= kinds:
+        raise DriveError("The catalog on Google Drive is damaged or was changed – not used.")
+
+
 def _clean_old_work(base):
     """Remove working copies left by app runs that ended long ago (older than 2 days)."""
     try:
@@ -175,7 +198,8 @@ def list_sets(drive):
     r = drive.call("GET", f"{API}/files", {
         "q": f"mimeType = '{FOLDER_MIME}' and trashed = false and {_q(root)} in parents",
         "fields": "files(name)", "spaces": "drive", "pageSize": 1000})
-    return sorted(f["name"][:-len(SUFFIX)] for f in r.get("files", []) if f["name"].endswith(SUFFIX))
+    return sorted(n for n in (f["name"][:-len(SUFFIX)] for f in r.get("files", [])
+                              if f["name"].endswith(SUFFIX)) if safe_component(n))
 
 
 def runs_of(set_name, cfg, drive=None):
@@ -530,7 +554,7 @@ def _remove_runs(_sets, set_name, cfg, run_ids, keep=None, drive=None):
             if r is None:
                 problems.append(f"export {rid} is still needed - not removed")
                 continue
-            if not r.folder or "/" in r.folder or r.folder.startswith("."):
+            if not valid_run_folder(r.folder):           # the catalog may be tampered
                 problems.append(f"{r.folder}: unexpected folder - not removed")
                 continue
             try:
@@ -582,11 +606,16 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
     if not chain:
         cat.close()
         raise ValueError("No completed full export found - nothing to restore from.")
-    plan = {}
+    plan, refused = {}, []
     for run in chain:                                  # later runs win
         for rel, (sz, mt, sha) in cat.files_of([run.id]).items():
+            if safe_rel(rel) is None or not valid_run_folder(run.folder):
+                refused.append(rel)                    # the catalog points outside the folders
+                continue
             plan[rel] = (run, sz, mt, sha)
     cat.close()
+    for rel in refused:
+        ui.error(f"Refused (the catalog points outside the restore folder): {rel!r}")
     started = datetime.now()
     t0 = time.monotonic()
     tmp = restore_dir / ".restore-tmp"
@@ -606,17 +635,24 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
                     raise DriveError("missing on Google Drive")
                 got = drive.download(fid, part, sz, on_bytes=lambda b: prog.update(add_bytes=b),
                                      cancel=cancel)
+                final = inside(restore_dir, rel)
                 if got != sha:
                     st = "ERROR: downloaded data differs (SHA-256 mismatch)"
                     part.unlink()
+                elif final is None:
+                    st = "ERROR: path outside the restore folder - refused"
+                    part.unlink()
                 else:
-                    final = restore_dir / rel
                     final.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(part, final)
                     os.utime(final, (mt, mt))
                     st = "OK - downloaded and verified"
-            except DriveError as e:
+            except (DriveError, OSError) as e:          # one file never stops the restore
                 got, st = "", f"ERROR: {e}"
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
             finally:
                 prog.end(token)
             if not st.startswith("OK"):
@@ -627,6 +663,7 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
     finally:
         prog.finish()
         shutil.rmtree(tmp, ignore_errors=True)
+    errors += len(refused)
     ok = status == "COMPLETED" and not errors
     verdict = (f"RESTORE OK - {len(rows)} files downloaded from Google Drive and verified." if ok
                else f"ATTENTION - {status}, {errors} file(s) with problems")

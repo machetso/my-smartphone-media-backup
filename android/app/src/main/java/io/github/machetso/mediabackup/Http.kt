@@ -18,7 +18,7 @@ class Request(
 
     companion object {
         private const val MAX_HEADER = 16 * 1024
-        private const val MAX_BODY = 64L * 1024 * 1024
+        private const val MAX_BODY = 2L * 1024 * 1024     // was 64 MB – allocated before any check
 
         /** null = connection closed cleanly. */
         fun read(inp: BufferedInputStream): Request? {

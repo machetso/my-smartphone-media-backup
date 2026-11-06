@@ -79,7 +79,7 @@ def _safe_extract(zf, target):
         dest.parent.mkdir(parents=True, exist_ok=True)
         with zf.open(info) as src, open(dest, "wb") as out:
             shutil.copyfileobj(src, out)
-        mode = (info.external_attr >> 16) & 0o777
+        mode = (info.external_attr >> 16) & 0o755        # never group/world-writable
         if mode and not sys.platform.startswith("win"):
             os.chmod(dest, mode)
 

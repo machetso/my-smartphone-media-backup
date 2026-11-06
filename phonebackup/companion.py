@@ -37,8 +37,8 @@ from .sources import SourceFile, _dedupe, _run
 
 SERVICE_TYPE = "_phonebkp._tcp"
 APP_PACKAGE = "io.github.machetso.mediabackup"
-APP_VERSION_CODE = 6          # versionCode of the bundled assets/companion/MediaBackup.apk
-APP_VERSION_NAME = "0.3.3"    # its versionName (shown before installing)
+APP_VERSION_CODE = 7          # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_NAME = "0.4.0"    # its versionName (shown before installing)
 APP_NAME = "My Media Backup"
 DEFAULT_PORT = 47823
 SETUP_PORT = 47824
@@ -666,17 +666,22 @@ def fingerprint_over_cable(adb_source):
         return None, None
 
 
-def pair_over_cable(adb_source, cfg, wait_s=180, cancel=None):
-    """Pair with the phone app over the USB cable; the user taps "Pair" on the phone.
-    The cable (and USB debugging, which the user allowed for this computer) replaces the 6-digit
-    code. Returns the new phone entry; raises CompanionError."""
+def pair_over_cable(adb_source, cfg, wait_s=180, cancel=None, on_code=None):
+    """Pair with the phone app over the USB cable; the user compares a 6-digit code and taps
+    "Pair" on the phone. The code comes from a random value of this computer and the phone key
+    this computer just pinned: another app on the phone that put itself in between (its own key)
+    shows a different code (security review 2026-11-06). Returns the new phone entry."""
     port, fp = fingerprint_over_cable(adb_source)
     if not port:
         raise CompanionError("the phone app does not answer over the cable (is it open?)")
     pc_id, pc_name = pc_identity(cfg)
+    nonce = secrets.token_hex(16)
+    code = pairing_code(nonce, fp)
     c = Client(f"127.0.0.1:{port}", fp, timeout=20)
     try:
-        c.request("POST", "/usbpair", {"pc_id": pc_id, "pc_name": pc_name})
+        c.request("POST", "/usbpair", {"pc_id": pc_id, "pc_name": pc_name, "nonce": nonce})
+        if on_code:
+            on_code(code)
         deadline = time.monotonic() + wait_s
         while time.monotonic() < deadline:
             if cancel is not None and cancel.is_set():
@@ -741,6 +746,8 @@ class SetupServer:
         self.port = 0
         self._preferred = port
         self.ip = (local_ips() or ["127.0.0.1"])[0]
+        self._paired = False             # the first pairing request wins – no later replacement
+        self._lock = threading.Lock()
 
     # -- urls
     @property
@@ -762,6 +769,8 @@ class SetupServer:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = 10                 # silent / slow connections are dropped
+
             def log_message(self, *a):
                 pass
 
@@ -791,8 +800,8 @@ class SetupServer:
                     return self._send(404, b"Not found")
                 try:
                     n = int(self.headers.get("Content-Length", "0"))
-                    if n > 10000:
-                        raise ValueError("too large")
+                    if not 0 < n <= 10000:                  # also no negative length (= read all)
+                        raise ValueError("bad length")
                     d = json.loads(self.rfile.read(n))
                     if not secrets.compare_digest(str(d.get("token", "")), server.token):
                         return self._send(403, b'{"error":"wrong token"}', "application/json")
@@ -805,13 +814,19 @@ class SetupServer:
                     req.code = pairing_code(server.token, fp)
                 except (ValueError, KeyError, TypeError):
                     return self._send(400, b'{"error":"bad request"}', "application/json")
+                with server._lock:
+                    if server._paired:     # a second phone/attacker must not replace the shown code
+                        return self._send(409, b'{"error":"pairing already requested"}',
+                                          "application/json")
+                    server._paired = True
                 server.on_pair_request(req)
                 self._send(200, b'{"ok":true}', "application/json")
 
         last = None
         for port in (self._preferred, 0):
             try:
-                self.httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+                # only on the address shown in the QR code, not on every network interface
+                self.httpd = ThreadingHTTPServer((self.ip, port), Handler)
                 break
             except OSError as e:
                 last = e
@@ -848,16 +863,27 @@ videos – nothing else, and it cannot delete or change anything.</p>
 installing apps from your browser.</small>
 <a class="btn btn2" href="{html.escape(self.intent_url())}">2. Connect app with this computer</a>
 <small>Already installed? Just tap step 2. The phone and the computer then show the same 6-digit
-code – confirm it on the computer.</small>
+code – confirm it on the phone AND on the computer.</small>
 </body></html>"""
 
-    def claim(self, req):
-        """After the user confirmed the code: fetch the secret from the phone over pinned TLS."""
-        c = Client(req.address, req.fingerprint, timeout=20)
-        try:
-            res = c.request("POST", "/claim", {"token": req.token})
-        finally:
-            c.close()
+    def claim(self, req, cancel=None, wait=180):
+        """After the user confirmed the code: fetch the secret from the phone over pinned TLS.
+        The phone hands it out only after the code was ALSO confirmed on the phone (answer 409
+        "wait" until then) – so no app or web link on the phone can pair by itself."""
+        deadline = time.monotonic() + wait
+        while True:
+            c = Client(req.address, req.fingerprint, timeout=20)
+            try:
+                res = c.request("POST", "/claim", {"token": req.token})
+                break
+            except CompanionError as e:
+                if "409" not in str(e) or time.monotonic() > deadline or (cancel and cancel.is_set()):
+                    if "409" in str(e):
+                        raise CompanionError("the pairing was not confirmed on the phone") from e
+                    raise
+            finally:
+                c.close()
+            time.sleep(1.5)
         if not isinstance(res, dict) or not res.get("secret"):
             raise CompanionError("the phone did not hand out a key")
         entry = {"phone_id": res.get("phone_id") or req.phone_id,

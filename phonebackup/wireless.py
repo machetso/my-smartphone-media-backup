@@ -148,12 +148,23 @@ def _port_open(address, timeout=1.0):
         return False
 
 
-def auto_connect(adb, last_address=""):
-    """Connect paired phones that announce themselves in the Wi-Fi (and the last used address).
+def service_serial(name):
+    """'adb-5A111FDCH0014T-AbCdEf' → '5A111FDCH0014T' ('' if it does not look like that)."""
+    if not name.startswith("adb-"):
+        return ""
+    return name[4:].rpartition("-")[0]
 
-    Returns the address that worked, or "". Unpaired phones simply refuse - nothing happens.
+
+def auto_connect(adb, last_address="", known_serials=()):
+    """Connect phones in the Wi-Fi that THIS computer paired before (and the last used address).
+
+    Only services of known phones are tried (security review 2026-11-06: any device announcing
+    "wireless debugging" in the network used to be connected – a fake one could feed files into
+    a backup). New phones are added with "Pair over Wi-Fi…". Returns the address or "".
     """
-    candidates = [s.address for s in mdns_services(adb) if s.kind == CONNECT]
+    known = set(known_serials or ())
+    candidates = [s.address for s in mdns_services(adb)
+                  if s.kind == CONNECT and service_serial(s.name) in known]
     if last_address and last_address not in candidates and _port_open(last_address):
         candidates.append(last_address)
     for addr in candidates:
@@ -174,10 +185,26 @@ def new_qr_pairing():
     return name, password, f"WIFI:T:ADB;S:{name};P:{password};;"
 
 
-def remember(cfg, address):
+def remember(cfg, address, adb=None):
+    """Remember the address – and the phone behind it (its serial from the Wi-Fi announcement),
+    so that only phones this computer connected on purpose are connected automatically."""
     from . import config
+    changed = False
     if address and cfg.get("wifi_last_address") != address:
         cfg["wifi_last_address"] = address
+        changed = True
+    if address and adb:
+        try:
+            for s in mdns_services(adb):
+                serial = service_serial(s.name)
+                if s.kind == CONNECT and s.address == address and serial:
+                    known = list(cfg.get("wifi_serials", []))
+                    if serial not in known:
+                        cfg["wifi_serials"] = known + [serial]
+                        changed = True
+        except Exception:  # noqa: BLE001 - only a convenience for the next automatic connection
+            pass
+    if changed:
         try:
             config.save(cfg)
         except OSError:

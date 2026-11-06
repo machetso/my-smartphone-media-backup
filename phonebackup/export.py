@@ -25,6 +25,7 @@ from . import gfs, ui
 from .copier import Cancelled, file_chunks, stream_copy
 from .index import INTERNAL_DIR, open_readonly_lookup
 from .report import unique_basename, write_reports
+from .safety import inside, safe_rel, valid_run_folder
 
 EXPORT_DIR = ".phonebackup-export"
 MODES = ("full", "differential", "incremental")
@@ -46,6 +47,10 @@ class Catalog:
         d = self.parent / EXPORT_DIR
         d.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(d / "catalog.sqlite"))
+        try:        # a catalog from a drive / Google Drive is not trusted: no triggers/views run
+            self.db.execute("PRAGMA trusted_schema=OFF")
+        except sqlite3.Error:
+            pass
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT,
                 folder TEXT, started TEXT, finished TEXT, status TEXT);
@@ -144,8 +149,13 @@ def _category(rel):
     return "other"
 
 
-def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None):
-    """Copy one file with read-back verification. Returns (status, sha)."""
+def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None, overwrite=False):
+    """Copy one file with read-back verification. Returns (status, sha).
+    Never raises for a single file (a too long name, a disk error … becomes an ERROR row) and,
+    unless `overwrite`, never replaces an existing file (e.g. IMG.jpg vs IMG.JPG on exFAT)."""
+    final = Path(final)
+    if not overwrite and final.exists():
+        return "ERROR: a file with this name is already there (names that differ only in upper/lower case?) - not overwritten", None
     tmp = Path(dst_dir_tmp) / f"{uuid.uuid4().hex}.part"
     try:
         sha, n, (w,) = stream_copy(file_chunks(src), [tmp], fsync=cfg.get("fsync", True),
@@ -158,11 +168,19 @@ def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None
         except OSError:
             pass
         return f"ERROR: {'write failed: ' + w.error if w.error else 'verification failed'}", None
-    final = Path(final)
-    final.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(tmp, final)
-    st = os.stat(src)
     try:
+        final.parent.mkdir(parents=True, exist_ok=True)
+        if not overwrite and final.exists():
+            raise FileExistsError("a file with this name is already there - not overwritten")
+        os.replace(tmp, final)
+    except OSError as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return f"ERROR: cannot write the file ({e})", None
+    try:
+        st = os.stat(src)
         os.utime(final, (st.st_atime, st.st_mtime))
     except OSError:
         pass
@@ -240,6 +258,9 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None, now=None)
                          sha or "", f"{folder}/{rel}" if sha else ""])
     except (KeyboardInterrupt, Cancelled):
         status = "CANCELLED by user"
+    except Exception as e:  # noqa: BLE001 - the run must never stay RUNNING without a report
+        status = f"STOPPED - {type(e).__name__}: {e}"
+        ui.error(f"Export stopped: {e}")
     finally:
         prog.finish()
         shutil.rmtree(tmp, ignore_errors=True)
@@ -301,8 +322,9 @@ def remove_runs(target_parent, run_ids, keep=None):
             if r is None:
                 problems.append(f"export {rid} is still needed - not removed")
                 continue
-            folder = (target_parent / r.folder).resolve()
-            if folder.parent != target_parent or not r.folder or r.folder.startswith("."):
+            folder = (target_parent / str(r.folder)).resolve()
+            # only a real run folder, directly in this export folder (the catalog may be tampered)
+            if not valid_run_folder(r.folder) or folder.parent != target_parent:
                 problems.append(f"{r.folder}: unexpected folder - not removed")
                 continue
             try:
@@ -336,11 +358,16 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     if not chain:
         cat.close()
         raise ValueError("No completed full export found - nothing to restore from.")
-    plan = {}
+    plan, refused = {}, []
     for run in chain:                                  # later runs win
         for rel, (sz, _mt, sha) in cat.files_of([run.id]).items():
+            if safe_rel(rel) is None or not valid_run_folder(run.folder):
+                refused.append(rel)                    # would leave the restore folder
+                continue
             plan[rel] = (run, sz, sha)
     cat.close()
+    for rel in refused:
+        ui.error(f"Refused (the catalog points outside the folders): {rel!r}")
     started = datetime.now()
     t0 = time.monotonic()
     tmp = restore_dir / ".restore-tmp"
@@ -352,8 +379,11 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     rows, errors, status = [], 0, "COMPLETED"
     try:
         for i, (rel, (run, sz, sha)) in enumerate(sorted(plan.items()), 1):
-            st, got = _verified_copy(target_parent / run.folder / rel, tmp, restore_dir / rel, sha, cfg,
-                                     prog, cancel)
+            src, dst = inside(target_parent / run.folder, rel), inside(restore_dir, rel)
+            if src is None or dst is None:
+                st, got = "ERROR: path outside the export or restore folder - refused", None
+            else:
+                st, got = _verified_copy(src, tmp, dst, sha, cfg, prog, cancel, overwrite=True)
             if not st.startswith("OK"):
                 errors += 1
             rows.append([i, Path(rel).name, ui.human_size(sz), rel, run.folder, st, got or ""])
@@ -363,6 +393,7 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     finally:
         prog.finish()
         shutil.rmtree(tmp, ignore_errors=True)
+    errors += len(refused)
     ok = status == "COMPLETED" and not errors
     verdict = (f"RESTORE OK - {len(rows)} files restored and verified." if ok
                else f"ATTENTION - {status}, {errors} file(s) with problems")

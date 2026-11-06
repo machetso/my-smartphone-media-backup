@@ -40,10 +40,29 @@ def load() -> dict:
     return cfg
 
 
-def save(cfg: dict) -> None:
-    p = config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
+def write_private(p: Path, text: str) -> None:
+    """Write a file only this user may read (settings with the hotspot password, the Google
+    sign-in): folder 0700, file 0600 – also when an old temp file with other rights is left."""
+    p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    try:
+        os.unlink(tmp)                   # a left-over / planted temp file keeps its own rights
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, p)
+
+
+def save(cfg: dict) -> None:
+    write_private(config_path(), json.dumps(cfg, indent=2, ensure_ascii=False))

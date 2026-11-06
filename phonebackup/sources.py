@@ -380,10 +380,10 @@ def connect_adb(cfg):
     except (OSError, subprocess.SubprocessError):
         no_phone = False
     if no_phone:
-        addr = auto_connect(adb, cfg.get("wifi_last_address", ""))
+        addr = auto_connect(adb, cfg.get("wifi_last_address", ""), cfg.get("wifi_serials", []))
         if addr:
             ui.info(f"  Phone found over Wi-Fi ({addr}).")
-            remember(cfg, addr)
+            remember(cfg, addr, adb)
     deadline = time.monotonic() + wait
     told_unauth = False
     while True:

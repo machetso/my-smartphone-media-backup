@@ -23,10 +23,14 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
     companion object {
         const val PREFERRED_PORT = 47823
         const val PROTOCOL = 1
+        const val MAX_CONNECTIONS = 24
     }
 
     private val media = MediaIndex(ctx)
-    private val pool = Executors.newCachedThreadPool()
+    // bounded: unauthenticated connections cannot create unlimited threads
+    private val pool = java.util.concurrent.ThreadPoolExecutor(
+        2, MAX_CONNECTIONS, 60L, java.util.concurrent.TimeUnit.SECONDS,
+        java.util.concurrent.SynchronousQueue())
     private var socket: ServerSocket? = null
     @Volatile var lastActivity = System.currentTimeMillis()
         private set
@@ -41,17 +45,33 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             ss.bind(InetSocketAddress(0))
         }
         socket = ss
-        pool.execute {
+        Thread({
             while (!ss.isClosed) {
                 val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
-                pool.execute { serve(s) }
+                if (!isLocalPeer(s.inetAddress)) {        // e.g. mobile data / public IPv6
+                    try { s.close() } catch (_: Exception) {}
+                    continue
+                }
+                try {
+                    pool.execute { serve(s) }
+                } catch (e: java.util.concurrent.RejectedExecutionException) {
+                    try { s.close() } catch (_: Exception) {}
+                }
             }
-        }
+        }, "server-accept").apply { isDaemon = true; start() }
     }
 
     fun stop() {
         try { socket?.close() } catch (_: Exception) {}
         pool.shutdownNow()
+    }
+
+    /** Loopback (adb forward over the cable) or the local network – never the internet. */
+    private fun isLocalPeer(a: java.net.InetAddress?): Boolean {
+        if (a == null) return false
+        if (a.isLoopbackAddress || a.isSiteLocalAddress || a.isLinkLocalAddress) return true
+        val b = a.address
+        return a is java.net.Inet6Address && (b[0].toInt() and 0xfe) == 0xfc   // fc00::/7 (ULA)
     }
 
     private fun serve(s: Socket) {
@@ -62,7 +82,6 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             try {
                 while (true) {
                     val req = Request.read(inp) ?: return
-                    lastActivity = System.currentTimeMillis()
                     val keep = handle(req, out, sock.inetAddress?.isLoopbackAddress == true)
                     if (!keep || !req.keepAlive) return
                 }
@@ -91,7 +110,18 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
                 return false
             }
             if (req.path == "/usbpair") {
-                CablePairing.request(pcId, body?.optString("pc_name").orEmpty().ifEmpty { "Computer" }.take(60))
+                // the computer's random value → code from it + THIS phone's key, shown on both
+                // screens: an app that put itself in between (own key) cannot produce it
+                val nonce = body?.optString("nonce").orEmpty()
+                if (nonce.length !in 16..128) {
+                    Response.json(out, 400, """{"error":"nonce missing"}""", false)
+                    return false
+                }
+                val code = Identity.pairingCode(nonce, Identity.fingerprint())
+                if (!CablePairing.request(pcId, body?.optString("pc_name").orEmpty().ifEmpty { "Computer" }.take(60), code)) {
+                    Response.json(out, 409, """{"error":"another pairing request is waiting on the phone"}""", false)
+                    return false
+                }
                 onEvent("PAIR_REQUEST")
                 Response.json(out, 202, """{"pending":true}""", keep)
                 return keep
@@ -116,6 +146,10 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
         // ---- pairing: the one request that does not need a secret (needs the one-time token)
         if (req.method == "POST" && req.path == "/claim") {
             val token = runCatching { jsonBody(req).getString("token") }.getOrNull()
+            if (Pairing.waitingForConfirmation(token)) {     // the computer asks again in a moment
+                Response.json(out, 409, """{"error":"confirm on the phone","wait":true}""", false)
+                return false
+            }
             val pc = Pairing.claim(ctx, token)
             if (pc == null) {
                 Response.json(out, 403, """{"error":"no pairing pending or wrong token"}""", false)
@@ -131,6 +165,7 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             Response.json(out, 401, """{"error":"not paired"}""", false)
             return false
         }
+        lastActivity = System.currentTimeMillis()    // only a PAIRED computer keeps backup mode on
         // ---- debugging guard (see UsbDebug): start / still here / end of a backup
         when ("${req.method} ${req.path}") {
             "POST /guard/start" -> {
@@ -160,7 +195,9 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             }
             "POST /guard/end" -> {
                 val off = runCatching { jsonBody(req).optBoolean("off", true) }.getOrDefault(true)
-                if (off) UsbDebug.switchOff(ctx) else UsbDebug.Guard.reset(ctx)
+                // switched on by this app → always off again (a computer cannot keep it on)
+                if (off || UsbDebug.Guard.switchedOnByApp(ctx)) UsbDebug.switchOff(ctx)
+                else UsbDebug.Guard.reset(ctx)
                 Response.json(out, 200, """{"ok":true}""", keep)
                 return keep
             }
@@ -223,14 +260,22 @@ object BuildConfigInfo {
 /** A computer asked to pair over the USB cable; the user accepts or refuses it on the phone. */
 object CablePairing {
     enum class State { NONE, PENDING, ACCEPTED, REFUSED }
-    private data class Req(val pcId: String, val name: String, val created: Long, var state: State)
+    private data class Req(val pcId: String, val name: String, val code: String, val created: Long, var state: State)
     @Volatile private var req: Req? = null
     var pendingName by androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
+    var pendingCode by androidx.compose.runtime.mutableStateOf("")
+        private set
 
-    @Synchronized fun request(pcId: String, name: String) {
-        req = Req(pcId, name, System.currentTimeMillis(), State.PENDING)
+    /** false = another computer's (or app's) request is still waiting – it is never replaced. */
+    @Synchronized fun request(pcId: String, name: String, code: String): Boolean {
+        val r = req
+        if (r != null && r.state == State.PENDING && r.pcId != pcId &&
+            System.currentTimeMillis() - r.created < 5 * 60_000) return false
+        req = Req(pcId, name, code, System.currentTimeMillis(), State.PENDING)
         pendingName = name
+        pendingCode = code
+        return true
     }
 
     @Synchronized fun state(pcId: String): State {
@@ -243,6 +288,7 @@ object CablePairing {
     @Synchronized fun answer(accept: Boolean) {
         req?.state = if (accept) State.ACCEPTED else State.REFUSED
         pendingName = null
+        pendingCode = ""
     }
 
     /** Ends the request; returns the computer's name. */

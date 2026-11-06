@@ -52,6 +52,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="phonebackup" android:host="pair" />
+            </intent-filter>
+            <!-- opened by the computer over the cable (adb: am start) – not from web pages -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="phonebackup" android:host="cable" />
             </intent-filter>
         </activity>

@@ -48,6 +48,7 @@ object UsbDebug {
         if (!canSwitch(context)) return "Not allowed yet – connect the phone once with USB debugging switched on by hand."
         put(context, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 1)
         put(context, Settings.Global.ADB_ENABLED, 1)
+        Guard.markSwitchedOn(context, true)
         Guard.armStart(context)
         return null
     }
@@ -57,6 +58,7 @@ object UsbDebug {
         if (!canSwitch(context)) return "Not allowed."
         put(context, "adb_wifi_enabled", 0)
         put(context, Settings.Global.ADB_ENABLED, 0)
+        Guard.markSwitchedOn(context, false)
         Guard.reset(context)
         return null
     }
@@ -102,6 +104,14 @@ object UsbDebug {
                 else -> { am.cancel(pi); return }
             }
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at + 1000, pi)
+        }
+
+        /** Did THIS app switch USB debugging on? Then the end of a backup always switches it off. */
+        fun switchedOnByApp(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("by_app", false)
+
+        fun markSwitchedOn(context: Context, on: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("by_app", on).apply()
         }
 
         fun armStart(context: Context) {

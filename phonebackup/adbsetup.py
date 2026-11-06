@@ -10,6 +10,7 @@ No Qt here: the GUI (`gui_setup.py`) shows it. Contents:
   for any other phone.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -221,7 +222,10 @@ def _linux_usb_phones(sysfs="/sys/bus/usb/devices"):
 
 
 def _windows_usb_phones():
-    cmd = ["powershell", "-NoProfile", "-Command",
+    # full path: Windows would otherwise also look in the current folder for "powershell.exe"
+    ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell",
+                      "v1.0", "powershell.exe")
+    cmd = [ps, "-NoProfile", "-Command",
            "Get-PnpDevice -Class WPD -PresentOnly | Select-Object -ExpandProperty FriendlyName"]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=15, creationflags=_NO_WINDOW)

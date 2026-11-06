@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var hasNetwork by mutableStateOf(false)
     private var pairCode by mutableStateOf<String?>(null)
     private var pairInfo by mutableStateOf("")
+    private var pairReady by mutableStateOf(false)    // code shown: waiting for the user's tap
     private var canSwitchUsb by mutableStateOf(false)
     private var usbInfo by mutableStateOf("")
 
@@ -73,6 +74,9 @@ class MainActivity : ComponentActivity() {
         if (!hasAccess || !hasNetwork) askAll()
         else if (Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         handle(intent)
+        // no taps through an overlay of another app (tapjacking): "Allow backup over cable",
+        // "Pair" … only count when this window is fully visible
+        window.decorView.filterTouchesWhenObscured = true
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) { Screen() }
@@ -99,7 +103,16 @@ class MainActivity : ComponentActivity() {
             BackupService.start(this)
             return
         }
-        val p = intent?.data?.let { Pairing.parse(it) } ?: return
+        val data = intent?.data
+        val p = data?.let { Pairing.parse(it) }
+        if (p == null) {
+            if (data?.scheme == "phonebackup" && data.host == "pair") {
+                setIntent(Intent())
+                pairCode = null
+                usbInfo = "Pairing link refused: the computer must be in your local network."
+            }
+            return
+        }
         setIntent(Intent())          // do not pair again on rotation
         pairCode = p.code
         if (!MediaIndex.hasLocalNetwork(this)) {
@@ -119,7 +132,8 @@ class MainActivity : ComponentActivity() {
             while (BackupService.server?.port.let { it == null || it == 0 } && tries++ < 50) Thread.sleep(100)
             val err = Pairing.announce(this, p, BackupService.server?.port ?: 0)
             runOnUiThread {
-                pairInfo = err ?: "Check that ${p.pcName} shows the same code, then confirm there."
+                pairInfo = err ?: "Does “${p.pcName}” show exactly the same code?"
+                pairReady = err == null
             }
         }
     }
@@ -166,7 +180,10 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Pair over the USB cable", fontWeight = FontWeight.SemiBold)
                         Text("“$name” wants to back up this phone. Only confirm if this phone is " +
-                            "connected to that computer with a cable right now.")
+                            "connected to that computer with a cable right now and the computer " +
+                            "shows exactly this code:")
+                        Text(CablePairing.pendingCode.chunked(3).joinToString(" "), fontSize = 32.sp,
+                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { CablePairing.answer(true) }) { Text("Pair") }
                             OutlinedButton(onClick = { CablePairing.answer(false) }) { Text("Refuse") }
@@ -182,7 +199,23 @@ class MainActivity : ComponentActivity() {
                         Text(code.chunked(3).joinToString(" "), fontSize = 40.sp,
                             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         Text(pairInfo)
-                        TextButton(onClick = { Pairing.cancel(); pairCode = null }) { Text("Cancel") }
+                        if (pairReady) {
+                            Text("Only tap “Pair” if you started the pairing yourself and the " +
+                                "computer shows exactly this code.", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    if (Pairing.confirm()) {
+                                        pairInfo = "Confirmed – now confirm the same code on the computer."
+                                        pairReady = false
+                                    }
+                                }) { Text("Same code – Pair") }
+                                OutlinedButton(onClick = { Pairing.cancel(); pairCode = null; pairReady = false }) {
+                                    Text("Cancel")
+                                }
+                            }
+                        } else {
+                            TextButton(onClick = { Pairing.cancel(); pairCode = null }) { Text("Cancel") }
+                        }
                     }
                 }
             }

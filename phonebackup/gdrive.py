@@ -114,6 +114,8 @@ def sign_in(cfg, cancel=None, open_browser=webbrowser.open):
     result = {}
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 5             # a silent local connection must not block the sign-in
+
         def do_GET(self):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if qs.get("state", [""])[0] != state:
@@ -196,13 +198,7 @@ def _load_token():
 
 
 def _save_token(tok):
-    p = token_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(tok, f)
-    os.replace(tmp, p)
+    config.write_private(token_path(), json.dumps(tok))
 
 
 def _post_form(url, fields):

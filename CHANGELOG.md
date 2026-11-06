@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Security (review 2026-11-06)
+- **Pairing must now also be confirmed on the phone** (phone app 0.4.0). Before, any app on the
+  phone or a tapped web link could pair itself with the phone app and read the photos and
+  videos; the code was only checked on the computer. Pairing links are only accepted for
+  computers in the local network.
+- **Pairing over the cable shows a code on both screens**, made from a random value of the
+  computer and the phone's key – another app on the phone cannot put itself in between. A
+  waiting request is never replaced by another one.
+- Phone app: only answers devices in the local network (not mobile data / the internet); limited
+  number of connections and request size; only a paired computer keeps backup mode on; USB
+  debugging that the app switched on is always switched off at the end of a backup; taps through
+  another app's overlay are ignored; the cable link can no longer be opened from web pages.
+- Restore (drive and Google Drive) refuses catalog entries that point outside the restore folder;
+  cleanup only deletes real export folders; a catalog downloaded from Google Drive is checked and
+  folder names from Google Drive cannot point outside the app's data folder.
+- Wi-Fi debugging: only phones this computer connected on purpose are connected automatically.
+- The setup page only listens on the address of the QR code, drops slow connections, refuses bad
+  requests and keeps the first pairing request.
+- Settings and the Google sign-in are saved readable only by you; the Google sign-in window cannot
+  be blocked by another program.
+- CSV reports: file names that would run as spreadsheet formulas are neutralised.
+- A crafted photo can no longer hang the app (EXIF scan).
+- Export never overwrites a file in a new export folder (names that differ only in case) and an
+  error with one file no longer leaves the export unfinished without a report.
+- Release build: write rights only for the release step; GitHub actions pinned to fixed versions.
+
 ## [0.9.4] - 2026-11-05
 
 The biggest update so far: a simple start screen, a phone app for backups without cables and

@@ -5,6 +5,7 @@ import html
 from pathlib import Path
 
 from .layout import safe_name
+from .safety import csv_cell
 
 
 def unique_basename(directory, base, when):
@@ -40,7 +41,7 @@ def write_reports(directory, basename, title, verdict_ok, verdict, sections, col
     with open(p, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(columns)
-        w.writerows(rows)
+        w.writerows([csv_cell(v) for v in row] for row in rows)
     paths.append(p)
     return paths
 

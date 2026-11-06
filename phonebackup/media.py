@@ -55,10 +55,10 @@ def _ascii(buf, e, entry):
     if typ != 2:
         return None
     if cnt <= 4:
-        raw = val[:cnt]
+        raw = bytes(val[:cnt])
     else:
         o = struct.unpack(e + "I", val)[0]
-        raw = buf[o:o + cnt]
+        raw = bytes(buf[o:o + cnt])
     return raw.split(b"\0")[0].decode("ascii", "ignore").strip()
 
 
@@ -135,23 +135,27 @@ def _jpeg_exif(path):
     return None
 
 
+MAX_EXIF_CANDIDATES = 16       # real files have one or two EXIF blocks
+
+
 def _scan_exif(path, limit=8 * 1024 * 1024):
     """HEIC/AVIF/WEBP: find an embedded 'Exif' TIFF block by scanning the file head."""
     with open(path, "rb") as f:
         data = f.read(limit)
-    start = 0
-    while True:
+    view = memoryview(data)          # slices of a memoryview are not copies (a crafted file
+    start = 0                        # full of "Exif" markers used to copy megabytes each time)
+    for _ in range(MAX_EXIF_CANDIDATES):
         k = data.find(b"Exif\0\0", start)
         if k < 0:
             break
-        dt = tiff_datetime(data[k + 6:])
+        dt = tiff_datetime(view[k + 6:])
         if dt:
             return dt
         start = k + 6
     for sig in (b"II*\0", b"MM\0*"):
         k = data.find(sig)
         if k >= 0:
-            dt = tiff_datetime(data[k:])
+            dt = tiff_datetime(view[k:])
             if dt:
                 return dt
     return None

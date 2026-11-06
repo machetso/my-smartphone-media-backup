@@ -1865,11 +1865,14 @@ class MainWindow(QMainWindow):
                     return link
             if not ui.ask_yes_no(
                     "Pair the phone app with this computer over the USB cable?\n\nThe phone then "
-                    "asks “Pair over the USB cable” – tap “Pair” there. Afterwards this computer "
-                    "recognises the phone by its key (over the cable and over Wi-Fi)."):
+                    "asks “Pair over the USB cable” and shows a 6-digit code; this program shows "
+                    "the same code in the log. Only if both are the same, tap “Pair” on the phone. "
+                    "Afterwards this computer recognises the phone by its key (over the cable and "
+                    "over Wi-Fi)."):
                 return None
-            ui.info("Tap “Pair” on the phone (3 minutes) …")
-            pair_over_cable(src, self.cfg, cancel=self.cancel_event)
+            pair_over_cable(src, self.cfg, cancel=self.cancel_event, on_code=lambda code: ui.warn(
+                f"The phone must show the code  {code[:3]} {code[3:]}  – only then tap “Pair” "
+                "there (3 minutes). A different code: tap “Refuse”."))
             ui.ok("Paired over the USB cable.")
             link, why = link_over_cable(src, self.cfg)
             if not link:
@@ -1933,9 +1936,10 @@ class MainWindow(QMainWindow):
                         if (self.source is None and time.monotonic() >= next_wifi
                                 and not any(st == "device" for _, st in devs)):
                             next_wifi = time.monotonic() + 10
-                            addr = wireless.auto_connect(adb, self.cfg.get("wifi_last_address", ""))
+                            addr = wireless.auto_connect(adb, self.cfg.get("wifi_last_address", ""),
+                                                         self.cfg.get("wifi_serials", []))
                             if addr:
-                                wireless.remember(self.cfg, addr)
+                                wireless.remember(self.cfg, addr, adb)
                                 devs = adb_devices(adb)
                     except Exception:  # noqa: BLE001
                         devs = []
@@ -2166,7 +2170,8 @@ class MainWindow(QMainWindow):
                         except Exception:  # noqa: BLE001
                             p[key] = serials[0]
                 if not wifi:
-                    addr = wireless.auto_connect(adb, cfg.get("wifi_last_address", ""))
+                    addr = wireless.auto_connect(adb, cfg.get("wifi_last_address", ""),
+                                                 cfg.get("wifi_serials", []))
                     if addr:
                         p["adb_wifi"] = addr
             if paired_phones(cfg):

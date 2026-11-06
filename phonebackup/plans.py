@@ -217,6 +217,9 @@ def finish_gfs(d, status, cfg, cancel=None):
                     ui.error(f"  {rel}: {st}")
         except Cancelled:
             status = "CANCELLED by user"
+        except Exception as e:  # noqa: BLE001 - close the run and write the report anyway
+            status = f"STOPPED - {type(e).__name__}: {e}"
+            ui.error(f"  {d.label}: {status}")
         finally:
             prog.finish()
             ui.last_transfer = phone_transfer
