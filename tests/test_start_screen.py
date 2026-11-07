@@ -1,4 +1,5 @@
 """Start screen (update latest backup), connection modes, USB-debugging guide, control commands."""
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,6 +91,7 @@ class SetupGuideTest(unittest.TestCase):
         self.assertEqual(adbsetup._wpd_phones(text), ["Galaxy S20 FE"])
         self.assertEqual(adbsetup._wpd_phones(text.splitlines()[0]), [])
 
+    @unittest.skipIf(sys.platform.startswith("win"), "Linux sysfs names contain ':' (not allowed on Windows)")
     def test_drive_is_not_a_phone_linux(self):
         """A drive of a phone maker (Samsung T7 SSD, vendor 04e8) is not a phone."""
         with tempfile.TemporaryDirectory() as d:
