@@ -51,6 +51,14 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
   itself. **Find the fastest connection** checks the cable, the Wi-Fi and Bluetooth and shows
   what is available.
 
+  **Simple view:** only the connection status and, when it helps, a tip below it. A phone without
+  a backup yet: the tip suggests the USB cable with USB debugging (the first backup copies all
+  photos and videos). A phone on the cable without USB debugging, or connected over Wi-Fi / file
+  transfer: the tip says how much faster USB debugging is – *How to switch on USB debugging…*
+  opens the step-by-step guide (see below), *Continue without (slower file transfer)* uses the
+  phone's normal file transfer. Tick **Advanced connection settings** to see the speed overview,
+  all connection buttons and *Switch … off after the backup*.
+
   | Connection | Speed |
   |---|---|
   | USB cable + USB debugging (switched on by the phone app, or by hand) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -106,6 +114,13 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
   where they are; identical files are still stored only once.
 * **Backup destinations** – the list of destination drives; long folder names can be scrolled
   sideways (full name as a tooltip).
+  Tick one or more. *Add drive…* lists the connected external drives, including drives that are
+  attached but not mounted yet (Linux: they are mounted with one click, no password). *Add
+  folder…* opens a folder picker. A ticked drive that is attached but not mounted is mounted
+  automatically when the backup starts. A preview shows exactly where the files will go. The phone
+  is detected automatically as soon as it is plugged in via ADB. The list shows only the drives
+  used before with this phone (and owner), already ticked; a phone without a backup starts with an
+  empty list. *Add drive…* also offers the backup folders used before with other phones.
 
 **Never the wrong phone.** Every backup folder remembers its phone in `.phonebackup/phone.json`
 (model, the phone's serial number, the phone app's key id; for older backups the program reads
@@ -115,11 +130,8 @@ compared, or the model does not match the backup's name, you have to confirm it.
 first file the phone is identified a second time (a swapped phone stops the backup). A phone that
 connects never replaces the smartphone name you set, and while a phone is on the USB cable no
 other phone is taken over Wi-Fi. The confirmation shows the connection and, if it is not the
-fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of USB 2). Tick one or more. *Add drive…* lists the connected
-  external drives, including drives that are attached but not mounted yet (Linux: they are
-  mounted with one click, no password). *Add folder…* opens a folder picker. A ticked drive
-  that is attached but not mounted is mounted automatically when the backup starts. A preview shows exactly where the
-  files will go. The phone is detected automatically as soon as it is plugged in via ADB.
+fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of USB 2).
+
 **Manage backups…** has four tabs:
 
 * **Import old backup** – two ways:

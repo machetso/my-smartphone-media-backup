@@ -228,6 +228,8 @@ class LocationList(QWidget):
         self.multi, self.default_folder = multi, default_folder
         self.cfg.setdefault(sel_key, list(cfg.get(key, [])) if multi else cfg.get(key, [])[:1])
         self._updating = False
+        self.only = None            # show_only(): just these paths (one phone's drives), None = all
+        self.added = []             # added while the filter is on: stay visible
 
         self.tree = QTreeWidget()
         # backup drives: short name + plan first, the full folder last (long paths scroll sideways)
@@ -290,7 +292,27 @@ class LocationList(QWidget):
 
     # ---- data
     def paths(self):
+        if self.only is not None:
+            return list(self.only)
         return list(self.cfg.get(self.key, []))
+
+    def show_only(self, paths):
+        """Show (and tick) only these paths plus the ones added since reset_added() - e.g. the
+        drives used before with the connected phone. Unchanged list: the ticks stay as they are."""
+        want = list(paths) + [p for p in self.added if p not in paths]
+        if want == self.only:
+            return
+        known = list(self.cfg.get(self.key, []))
+        known += [p for p in want if p not in known]
+        self.cfg[self.key] = known
+        self.only = want
+        self.cfg[self.sel_key] = list(want)
+        config.save(self.cfg)
+        self.rebuild()
+        self.changed.emit()
+
+    def reset_added(self):
+        self.added = []
 
     def selected_paths(self):
         return [p for p in self.cfg.get(self.sel_key, []) if p in self.paths()]
@@ -441,6 +463,14 @@ class LocationList(QWidget):
             for d in unmounted:
                 a = self.drive_menu.addAction(describe_unmounted(d))
                 a.triggered.connect(lambda _checked=False, d=d: self._mount_and_add(d))
+        if self.only is not None:          # one phone's list: the other connected backup folders
+            used = [p for p in self.cfg.get(self.key, [])
+                    if p not in self.only and not is_cloud(p) and os.path.isdir(p)]
+            if used:
+                self.drive_menu.addSection(tr("Backup folders used before"))
+                for p in used:
+                    a = self.drive_menu.addAction(p)
+                    a.triggered.connect(lambda _checked=False, p=p: self._add(p))
 
     def _mount_and_add(self, d):
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -484,10 +514,13 @@ class LocationList(QWidget):
                 QMessageBox.critical(self, APP_NAME, tr("Cannot create the folder:") + f"\n{path}\n\n{e}")
                 return
             path = str(Path(path).resolve())
-        lst = self.paths()
+        lst = list(self.cfg.get(self.key, []))
         if path not in lst:
             lst.append(path)
         self.cfg[self.key] = lst
+        if self.only is not None and path not in self.only:
+            self.only.append(path)
+            self.added.append(path)
         sel = self.selected_paths()
         if self.multi:
             if path not in sel:
@@ -522,7 +555,10 @@ class LocationList(QWidget):
                                   tr("Remove this folder from the list?\n\n%s\n\n"
                                      "The files on the drive are NOT deleted.", p)) != QMessageBox.Yes:
             return
-        self.cfg[self.key] = [x for x in self.paths() if x != p]
+        self.cfg[self.key] = [x for x in self.cfg.get(self.key, []) if x != p]
+        if self.only is not None:
+            self.only = [x for x in self.only if x != p]
+            self.added = [x for x in self.added if x != p]
         self.cfg[self.sel_key] = [x for x in self.cfg.get(self.sel_key, []) if x != p]
         config.save(self.cfg)
         self.rebuild()
@@ -958,7 +994,7 @@ class MainWindow(QMainWindow):
         prow = QHBoxLayout()
         sel_all = QPushButton(tr("Select all"))
         sel_all.clicked.connect(lambda: [w.pick.setChecked(True) for w in self._phone_widgets.values()])
-        rm = QPushButton(tr("Remove from list"))
+        rm = QPushButton(tr("Remove ticked phones from list (backups are kept)"))
         rm.setToolTip(tr("Removes the ticked phones from this list. Their backups on the drives are NOT "
                          "deleted; a new backup of the phone adds it again."))
         rm.clicked.connect(self._remove_phones)
@@ -1069,6 +1105,9 @@ class MainWindow(QMainWindow):
     def _open_backup_page(self, new_backup):
         self.backup_page.title_label.setText(tr("New backup") if new_backup else tr("Backup settings"))
         self.start_backup_btn.setVisible(new_backup)
+        self.dest_list.reset_added()
+        self._apply_dest_filter()
+        self._update_conn_hints()
         self.dest_list.update_status()
         self._update_preview()
         self.pages.setCurrentWidget(self.backup_page)
@@ -1139,6 +1178,39 @@ class MainWindow(QMainWindow):
                                        "(slower, no check on the phone)."))
         self.app_btn.setText(tr("Phone app over Wi-Fi…"))
         self.connect_btn.setText(tr("File transfer (MTP)"))
+        # simple view (user request 2026-11-07): the status, a hint how to make it faster, and the
+        # rest (speeds, connection buttons, "debugging off") behind "Advanced connection settings".
+        # The program always picks the fastest connection it finds by itself (_on_adb_state).
+        self.conn_hint = QLabel()
+        self.conn_hint.setWordWrap(True)
+        self.conn_hint.setTextFormat(Qt.RichText)
+        self.conn_hint.setStyleSheet(f"QLabel{{border-left:3px solid {ORANGE};padding:4px 8px}}")
+        phone_box.addWidget(self.conn_hint)
+        self.hint_guide_btn = QPushButton(tr("How to switch on USB debugging…"))
+        self.hint_guide_btn.setToolTip(tr("Step-by-step guide for your phone."))
+        self.hint_guide_btn.clicked.connect(self._show_usb_guide)
+        self.hint_mtp_btn = QPushButton(tr("Continue without (slower file transfer)"))
+        self.hint_mtp_btn.setToolTip(tr("Uses the phone's normal file transfer (MTP): slower, no check "
+                                        "on the phone."))
+        self.hint_mtp_btn.clicked.connect(self._connect_manual)
+        hint_row = QHBoxLayout()
+        hint_row.addWidget(self.hint_guide_btn)
+        hint_row.addWidget(self.hint_mtp_btn)
+        hint_row.addStretch()
+        phone_box.addLayout(hint_row)
+        self._cable_no_debug = ""             # phone on the cable without USB debugging (poller)
+
+        self.conn_advanced_check = WrapCheck(tr("Advanced connection settings"))
+        self.conn_advanced_check.setToolTip(tr("Shows the connection types with their speed, the buttons "
+                                               "for Wi-Fi, phone app and file transfer, and whether USB "
+                                               "debugging is switched off after the backup."))
+        adv = QWidget()
+        adv_box = QVBoxLayout(adv)
+        adv_box.setContentsMargins(0, 0, 0, 0)
+        phone_box.removeWidget(self.conn_overview)
+        phone_box.removeWidget(self.debug_off_check)
+        adv_box.addWidget(self.conn_overview)
+        adv_box.addWidget(self.debug_off_check)
         for row in ((self.fastest_btn, self.guide_btn),
                     (self.app_btn, self.wifi_pair_btn, self.hotspot_btn),
                     (self.connect_btn,)):
@@ -1146,7 +1218,13 @@ class MainWindow(QMainWindow):
             for b in row:
                 btns.addWidget(b)
             btns.addStretch()
-            phone_box.addLayout(btns)
+            adv_box.addLayout(btns)
+        self.conn_advanced = adv
+        phone_box.addWidget(self.conn_advanced_check)
+        phone_box.addWidget(adv)
+        self.conn_advanced_check.setChecked(bool(self.cfg.get("conn_advanced", False)))
+        adv.setVisible(self.conn_advanced_check.isChecked())
+        self.conn_advanced_check.toggled.connect(self._conn_advanced_changed)
         lay.addWidget(_group(tr("Phone connection"), phone_box))
 
         fl = QHBoxLayout()
@@ -1939,6 +2017,7 @@ class MainWindow(QMainWindow):
         self.phone_status.show_status(head, text, color)
         self.home_status.show_status(head, text, color)
         self._update_home()
+        self._update_conn_hints()
 
     # ------------------------------------------------------------------ start screen
     def _connected_phone(self):
@@ -2069,6 +2148,65 @@ class MainWindow(QMainWindow):
     def _debug_off_changed(self, on):
         self.cfg["debugging_off_after"] = bool(on)
         config.save(self.cfg)
+
+    def _conn_advanced_changed(self, on):
+        self.cfg["conn_advanced"] = bool(on)
+        config.save(self.cfg)
+        self.conn_advanced.setVisible(bool(on))
+
+    def _phone_entries(self):
+        """Earlier backups of the phone in "Smartphone name" (start screen entries): the one of
+        this owner if there is one, else - no owner typed - those of every owner."""
+        phone, owner = self.phone_edit.text().strip(), self.owner_edit.text().strip()
+        if not phone:
+            return []
+        phones = self.cfg.get("phones") or {}
+        if owner:
+            e = phones.get(backup_parent_name(phone, owner))
+            return [e] if e else []
+        return [e for e in phones.values()
+                if phone.casefold() in (e.get("phone", "").casefold(), e.get("model", "").casefold())]
+
+    def _apply_dest_filter(self):
+        """Backup destinations (user request 2026-11-07): only the drives used before with this
+        phone; a phone without a backup starts with an empty list ("Add drive…")."""
+        dests = []
+        for e in self._phone_entries():
+            dests += [d for d in e.get("destinations", []) if d not in dests]
+        self.dest_list.show_only(dests)
+        self._update_preview()
+
+    def _update_conn_hints(self):
+        """Below the status: how to get the fastest connection (user request 2026-11-07). A phone
+        without a backup yet: suggest the cable; no USB debugging: say how much faster it is."""
+        if not hasattr(self, "conn_hint"):
+            return
+        src = getattr(self, "source", None)
+        first = not self._phone_entries()
+        text, guide, mtp = "", False, False
+        if src is not None and isinstance(src, AdbSource) and not src.wireless:
+            pass                                        # USB debugging on the cable: the fastest
+        elif src is None and self._cable_no_debug:
+            text = tr("%s is on the USB cable, but USB debugging is off. With USB debugging the "
+                      "data transfer is much faster (up to 50 MB/s instead of 10–20 MB/s) and every "
+                      "file is checked on the phone.", self._cable_no_debug)
+            guide = mtp = True
+        elif src is None:
+            if first:
+                text = tr("Tip for the first backup: connect the phone with a USB cable and switch on "
+                          "USB debugging once – the first backup copies all photos and videos, and "
+                          "the cable is by far the fastest way.")
+                guide = True
+        else:
+            text = tr("The data transfer could be much faster with USB debugging over the USB cable "
+                      "(up to 50 MB/s).")
+            if first:
+                text += " " + tr("Recommended for the first backup – it copies all photos and videos.")
+            guide = True
+        self.conn_hint.setText(html.escape(text))
+        self.conn_hint.setVisible(bool(text))
+        self.hint_guide_btn.setVisible(guide)
+        self.hint_mtp_btn.setVisible(mtp)
 
     def _show_usb_guide(self):
         model = self._connected_phone() or self.phone_edit.text().strip()
@@ -2283,6 +2421,9 @@ class MainWindow(QMainWindow):
 
     def _on_adb_state(self, state):
         adb, devs, cable = state
+        if cable != self._cable_no_debug:
+            self._cable_no_debug = cable
+            self._update_conn_hints()
         if self.busy or self.connecting:
             return
         src = self.source
@@ -2509,6 +2650,8 @@ class MainWindow(QMainWindow):
         config.save(self.cfg)
 
     def _load_profile(self):
+        self._apply_dest_filter()
+        self._update_conn_hints()
         key = self._profile_key()
         if not key:
             return

@@ -51,6 +51,15 @@ disques connectés. *Tout sélectionner* / *Retirer de la liste* masquent des t�
   **Trouver la connexion la plus rapide** vérifie le câble, le Wi-Fi et le Bluetooth et affiche
   ce qui est disponible.
 
+  **Vue simple :** seulement l’état de la connexion et, quand c’est utile, un conseil en dessous.
+  Un téléphone sans sauvegarde : le conseil propose le câble USB avec le débogage USB (la première
+  sauvegarde copie toutes les photos et vidéos). Un téléphone sur le câble sans débogage USB, ou
+  connecté par Wi-Fi / transfert de fichiers : le conseil indique combien le débogage USB est plus
+  rapide – *Comment activer le débogage USB…* ouvre le guide pas à pas (voir ci-dessous),
+  *Continuer sans (transfert de fichiers plus lent)* utilise le transfert de fichiers normal du
+  téléphone. Coche **Paramètres de connexion avancés** pour voir l’aperçu des vitesses, tous les
+  boutons de connexion et *Désactiver … après la sauvegarde*.
+
   | Connexion | Vitesse |
   |---|---|
   | Câble USB + débogage USB (activé par l’app du téléphone, ou à la main) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -106,6 +115,14 @@ disques connectés. *Tout sélectionner* / *Retirer de la liste* masquent des t�
   là où ils sont ; les fichiers identiques ne sont toujours stockés qu’une seule fois.
 * **Destinations de sauvegarde** – la liste des disques de destination ; les noms de dossier longs peuvent défiler
   horizontalement (nom complet en info-bulle).
+  Coche-en un ou plusieurs. *Ajouter un disque…* liste les disques externes connectés, y compris
+  ceux qui sont branchés mais pas encore montés (Linux : ils sont montés en un clic, sans mot de
+  passe). *Ajouter un dossier…* ouvre un sélecteur de dossier. Un disque coché qui est branché
+  mais pas monté est monté automatiquement au démarrage de la sauvegarde. Un aperçu montre
+  exactement où les fichiers iront. Le téléphone est détecté automatiquement dès qu’il est branché
+  via ADB. La liste n’affiche que les disques déjà utilisés avec ce téléphone (et ce
+  propriétaire), déjà cochés ; un téléphone sans sauvegarde commence avec une liste vide. *Ajouter
+  un disque…* propose aussi les dossiers de sauvegarde utilisés avec d’autres téléphones.
 
 **Jamais le mauvais téléphone.** Chaque dossier de sauvegarde mémorise son téléphone dans `.phonebackup/phone.json`
 (modèle, numéro de série du téléphone, identifiant de clé de l’app du téléphone ; pour les sauvegardes plus anciennes, le programme les lit
@@ -115,11 +132,8 @@ comparé, ou si le modèle ne correspond pas au nom de la sauvegarde, tu dois co
 premier fichier, le téléphone est identifié une seconde fois (un téléphone échangé arrête la sauvegarde). Un téléphone qui
 se connecte ne remplace jamais le nom de smartphone que tu as défini, et tant qu’un téléphone est sur le câble USB, aucun
 autre téléphone n’est pris par Wi-Fi. La confirmation affiche la connexion et, si ce n’est pas la plus
-rapide, comment la rendre plus rapide (câble + débogage USB ; câble USB 3 au lieu d’USB 2). Coche-en un ou plusieurs. *Ajouter un disque…* liste les
-  disques externes connectés, y compris ceux qui sont branchés mais pas encore montés (Linux : ils sont
-  montés en un clic, sans mot de passe). *Ajouter un dossier…* ouvre un sélecteur de dossier. Un disque coché
-  qui est branché mais pas monté est monté automatiquement au démarrage de la sauvegarde. Un aperçu montre exactement où
-  les fichiers iront. Le téléphone est détecté automatiquement dès qu’il est branché via ADB.
+rapide, comment la rendre plus rapide (câble + débogage USB ; câble USB 3 au lieu d’USB 2).
+
 **Gérer les sauvegardes…** comporte quatre onglets :
 
 * **Importer une ancienne sauvegarde** – deux possibilités :

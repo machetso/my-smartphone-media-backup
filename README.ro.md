@@ -51,6 +51,15 @@ conectate. *Selectează tot* / *Elimină din listă* ascund telefoanele (backup-
   **Găsește cea mai rapidă conexiune** verifică cablul, Wi-Fi-ul și Bluetooth-ul și arată
   ce este disponibil.
 
+  **Vizualizare simplă:** doar starea conexiunii și, când ajută, un sfat dedesubt. Un telefon fără
+  backup încă: sfatul recomandă cablul USB cu depanarea USB (primul backup copiază toate
+  fotografiile și videoclipurile). Un telefon pe cablu fără depanare USB sau conectat prin Wi-Fi /
+  transfer de fișiere: sfatul spune cât de mult mai rapidă este depanarea USB – *Cum activați
+  depanarea USB…* deschide ghidul pas cu pas (vezi mai jos), *Continuă fără (transfer de fișiere
+  mai lent)* folosește transferul normal de fișiere al telefonului. Bifează **Setări avansate de
+  conexiune** ca să vezi prezentarea vitezelor, toate butoanele de conectare și *Oprește … după
+  backup*.
+
   | Conexiune | Viteză |
   |---|---|
   | Cablu USB + depanare USB (pornită de aplicația de pe telefon sau manual) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -106,6 +115,14 @@ conectate. *Selectează tot* / *Elimină din listă* ascund telefoanele (backup-
   unde sunt; fișierele identice sunt în continuare stocate o singură dată.
 * **Destinații backup** – lista unităților de destinație; numele lungi de foldere pot fi derulate
   lateral (numele complet apare ca tooltip).
+  Bifează una sau mai multe. *Adaugă unitate…* listează unitățile externe conectate, inclusiv
+  unitățile atașate, dar încă nemontate (Linux: sunt montate cu un singur clic, fără parolă).
+  *Adaugă folder…* deschide un selector de foldere. O unitate bifată care este atașată, dar
+  nemontată, este montată automat la pornirea backup-ului. O previzualizare arată exact unde vor
+  ajunge fișierele. Telefonul este detectat automat imediat ce este conectat prin ADB. Lista arată
+  doar unitățile folosite anterior cu acest telefon (și proprietar), deja bifate; un telefon fără
+  backup începe cu o listă goală. *Adaugă unitate…* oferă și folderele de backup folosite cu alte
+  telefoane.
 
 **Niciodată telefonul greșit.** Fiecare folder de backup își ține minte telefonul în `.phonebackup/phone.json`
 (modelul, numărul de serie al telefonului, id-ul cheii aplicației de pe telefon; pentru backup-urile mai vechi programul le citește
@@ -115,11 +132,8 @@ modelul sau modelul nu se potrivește cu numele backup-ului, trebuie să confirm
 primul fișier, telefonul este identificat a doua oară (un telefon schimbat oprește backup-ul). Un telefon care
 se conectează nu înlocuiește niciodată numele de smartphone setat de tine, iar cât timp un telefon este pe cablul USB, niciun
 alt telefon nu este preluat prin Wi-Fi. Confirmarea arată conexiunea și, dacă nu este cea mai
-rapidă, cum o poți face mai rapidă (cablu + depanare USB; cablu USB 3 în loc de USB 2). Bifează una sau mai multe. *Adaugă unitate…* listează
-  unitățile externe conectate, inclusiv unitățile atașate, dar încă nemontate (Linux: sunt
-  montate cu un singur clic, fără parolă). *Adaugă folder…* deschide un selector de foldere. O unitate bifată
-  care este atașată, dar nemontată, este montată automat la pornirea backup-ului. O previzualizare arată exact unde vor ajunge
-  fișierele. Telefonul este detectat automat imediat ce este conectat prin ADB.
+rapidă, cum o poți face mai rapidă (cablu + depanare USB; cablu USB 3 în loc de USB 2).
+
 **Gestionează backup-urile…** are patru file:
 
 * **Importă backup vechi** – două variante:

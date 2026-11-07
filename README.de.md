@@ -51,6 +51,15 @@ Laufwerken gefunden. *Alle auswählen* / *Aus Liste entfernen* blenden Telefone 
   zum Kabel. **Schnellste Verbindung finden** prüft Kabel, Wi-Fi und Bluetooth und zeigt,
   was verfügbar ist.
 
+  **Einfache Ansicht:** nur der Verbindungsstatus und, wenn es hilft, ein Tipp darunter. Ein
+  Telefon ohne bisheriges Backup: Der Tipp empfiehlt das USB-Kabel mit USB-Debugging (das erste
+  Backup kopiert alle Fotos und Videos). Ein Telefon am Kabel ohne USB-Debugging oder über Wi-Fi /
+  Dateiübertragung verbunden: Der Tipp sagt, wie viel schneller USB-Debugging ist – *So schaltest
+  du USB-Debugging ein…* öffnet die Schritt-für-Schritt-Anleitung (siehe unten), *Ohne fortfahren
+  (langsamere Dateiübertragung)* nutzt die normale Dateiübertragung des Telefons. Hake
+  **Erweiterte Verbindungseinstellungen** an, um die Geschwindigkeitsübersicht, alle
+  Verbindungsknöpfe und *… nach dem Backup ausschalten* zu sehen.
+
   | Verbindung | Geschwindigkeit |
   |---|---|
   | USB-Kabel + USB-Debugging (von der Telefon-App oder von Hand eingeschaltet) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -106,6 +115,15 @@ Laufwerken gefunden. *Alle auswählen* / *Aus Liste entfernen* blenden Telefone 
   wo sie sind; identische Dateien werden weiterhin nur einmal gespeichert.
 * **Backup-Ziele** – die Liste der Ziellaufwerke; lange Ordnernamen lassen sich
   seitlich scrollen (voller Name als Tooltip).
+  Hake eines oder mehrere an. *Laufwerk hinzufügen…* listet die angeschlossenen externen Laufwerke
+  auf, auch Laufwerke, die angeschlossen, aber noch nicht eingebunden sind (Linux: Sie werden mit
+  einem Klick eingebunden, ohne Passwort). *Ordner hinzufügen…* öffnet eine Ordnerauswahl. Ein
+  angehaktes Laufwerk, das angeschlossen, aber nicht eingebunden ist, wird beim Start des Backups
+  automatisch eingebunden. Eine Vorschau zeigt genau, wohin die Dateien kommen. Das Telefon wird
+  automatisch erkannt, sobald es per ADB angeschlossen ist. Die Liste zeigt nur die Laufwerke, die
+  schon mit diesem Telefon (und Besitzer) genutzt wurden, bereits angehakt; ein Telefon ohne
+  Backup beginnt mit einer leeren Liste. *Laufwerk hinzufügen…* bietet auch die Backup-Ordner an,
+  die mit anderen Telefonen genutzt wurden.
 
 **Nie das falsche Telefon.** Jeder Backup-Ordner merkt sich sein Telefon in `.phonebackup/phone.json`
 (Modell, Seriennummer des Telefons, Schlüssel-ID der Telefon-App; bei älteren Backups liest das Programm
@@ -115,11 +133,8 @@ vergleichen oder passt das Modell nicht zum Namen des Backups, musst du es best�
 ersten Datei wird das Telefon ein zweites Mal erkannt (ein ausgetauschtes Telefon stoppt das Backup). Ein Telefon, das
 sich verbindet, ersetzt nie den von dir festgelegten Smartphone-Namen, und solange ein Telefon am USB-Kabel hängt, wird kein
 anderes Telefon über Wi-Fi übernommen. Die Bestätigung zeigt die Verbindung und, falls sie nicht die
-schnellste ist, wie es schneller geht (Kabel + USB-Debugging; USB-3-Kabel statt USB 2). Hake eines oder mehrere an. *Laufwerk hinzufügen…* listet die angeschlossenen
-  externen Laufwerke auf, auch Laufwerke, die angeschlossen, aber noch nicht eingebunden sind (Linux: Sie werden
-  mit einem Klick eingebunden, ohne Passwort). *Ordner hinzufügen…* öffnet eine Ordnerauswahl. Ein angehaktes Laufwerk,
-  das angeschlossen, aber nicht eingebunden ist, wird beim Start des Backups automatisch eingebunden. Eine Vorschau zeigt genau, wohin die
-  Dateien kommen. Das Telefon wird automatisch erkannt, sobald es per ADB angeschlossen ist.
+schnellste ist, wie es schneller geht (Kabel + USB-Debugging; USB-3-Kabel statt USB 2).
+
 **Backups verwalten…** hat vier Tabs:
 
 * **Altes Backup importieren** – zwei Wege:

@@ -53,6 +53,15 @@ pestañas que se describen más abajo).
   cambia al cable por sí solo. **Buscar la conexión más rápida** comprueba el cable, el Wi-Fi y el
   Bluetooth y muestra lo que está disponible.
 
+  **Vista sencilla:** solo el estado de la conexión y, cuando ayuda, un consejo debajo. Un
+  teléfono sin copia todavía: el consejo propone el cable USB con depuración USB (la primera copia
+  copia todas las fotos y vídeos). Un teléfono en el cable sin depuración USB, o conectado por
+  Wi-Fi / transferencia de archivos: el consejo dice cuánto más rápida es la depuración USB –
+  *Cómo activar la depuración USB…* abre la guía paso a paso (ver abajo), *Continuar sin ella
+  (transferencia de archivos más lenta)* usa la transferencia de archivos normal del móvil. Marca
+  **Ajustes avanzados de conexión** para ver el resumen de velocidades, todos los botones de
+  conexión y *Desactivar … después de la copia*.
+
   | Conexión | Velocidad |
   |---|---|
   | Cable USB + depuración por USB (activada por la app del teléfono, o a mano) | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -110,6 +119,14 @@ pestañas que se describen más abajo).
   siguen guardando una sola vez.
 * **Destinos de la copia**: la lista de unidades de destino; los nombres de carpeta largos se pueden
   desplazar lateralmente (el nombre completo aparece como información emergente).
+  Marca una o varias. *Añadir unidad…* muestra las unidades externas conectadas, incluidas las que
+  están enchufadas pero aún no montadas (Linux: se montan con un clic, sin contraseña). *Añadir
+  carpeta…* abre un selector de carpetas. Una unidad marcada que está enchufada pero no montada se
+  monta automáticamente al empezar la copia. Una vista previa muestra exactamente adónde irán los
+  archivos. El teléfono se detecta automáticamente en cuanto se conecta por ADB. La lista muestra
+  solo las unidades usadas antes con este teléfono (y propietario), ya marcadas; un teléfono sin
+  copia empieza con la lista vacía. *Añadir unidad…* también ofrece las carpetas de copia usadas
+  antes con otros teléfonos.
 
 **Nunca el teléfono equivocado.** Cada carpeta de copia recuerda su teléfono en `.phonebackup/phone.json`
 (modelo, número de serie del teléfono, id de la clave de la app del teléfono; en copias más antiguas
@@ -120,11 +137,8 @@ tienes que confirmarlo. Justo antes del primer archivo, el teléfono se identifi
 teléfono cambiado detiene la copia). Un teléfono que se conecta nunca sustituye el nombre de smartphone
 que has puesto, y mientras haya un teléfono en el cable USB no se toma ningún otro teléfono por Wi-Fi.
 La confirmación muestra la conexión y, si no es la más rápida, cómo hacerla más rápida (cable +
-depuración por USB; cable USB 3 en lugar de USB 2). Marca una o varias. *Añadir unidad…* muestra las
-  unidades externas conectadas, incluidas las que están enchufadas pero aún no montadas (Linux: se
-  montan con un clic, sin contraseña). *Añadir carpeta…* abre un selector de carpetas. Una unidad
-  marcada que está enchufada pero no montada se monta automáticamente al empezar la copia. Una vista previa muestra exactamente adónde
-  irán los archivos. El teléfono se detecta automáticamente en cuanto se conecta por ADB.
+depuración por USB; cable USB 3 en lugar de USB 2).
+
 **Gestionar copias…** tiene cuatro pestañas:
 
 * **Importar copia antigua**: dos formas:

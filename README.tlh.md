@@ -49,6 +49,13 @@ De' jengva'meyDaq tu'lu'. *Hoch yIwIv* / *tetlhvo' yIteq* HablI'mey So' (polghac
   Wi-Fi Dung rarlu'taHvIS HablI' tlheghDaq USB debugging chu'lu'bogh tu'lu'chugh, ghun tlhegh
   lo' ghaH ta'. **rarghach nomqu' yInej** tlhegh, Wi-Fi, Bluetooth je nID 'ej nuq tu'lu' 'agh.
 
+  **nab ngeD:** rarghach Dotlh neH, 'ej QaHchugh bIngDaq qeS. HablI' polghach ghajbe'bogh: USB
+  tlhegh USB debugging je qeS (wa'DIch polghach Hoch mIllogh HaSta je ghItlh). tlheghDaq HablI'
+  USB debugging Hutlhbogh, pagh Wi-Fi / De' noH Dung rarlu'bogh: USB debugging nom law' 'e' qeS
+  ja' – *USB QaghHa'moHwI' chu'meH mIw…* mIw tetlh poSmoH (bIng yIlegh), *Hutlh yItaH (De' noH
+  QIt)* HablI' De' noH motlh lo'. **rar SeHlaw Dun** yIwIv: Do 'agh, Hoch rarghach leQmey, *…
+  polghach pItlhDI' yIchu'Ha'* je.
+
   | rarghach | Do |
   |---|---|
   | USB tlhegh + USB debugging (HablI' ghun chu', pagh ghop chu'lu') | 45–50 MB/s (USB 3), ~20–30 MB/s (USB 2) |
@@ -104,6 +111,13 @@ De' jengva'meyDaq tu'lu'. *Hoch yIwIv* / *tetlhvo' yIteq* HablI'mey So' (polghac
   Daqchajvo' vIHbe'; ghItlh rap wa'logh neH pollu'.
 * **polghach Daqmey** – Daq De' jengva'mey tetlh; 'aplo' pongmey tIq
   poS nIH je vIHlaH (pong naQ tooltip 'oH).
+  wa' pagh law' yIwIv. *De' jengva' yIchel…* rarlu'bogh pa' De' jengva'mey tetlh 'agh, De'
+  jengva'mey rarlu'bogh 'ach chu'lu'be'bogh je (Linux: wa' Hot Dung chu'lu', mu'ngoq poQbe').
+  *'aplo' yIchel…* 'aplo' wIvwI' poSmoH. De' jengva' wIvlu'bogh rarlu'bogh 'ach chu'lu'be'bogh
+  polghach taghDI' ghaH ta' chu'lu'. nuqDaq ghItlhmey jaH 'e' lughbe'qu' 'agh. ADB Dung HablI'
+  rarlu'DI' SIbI' ghaH ta' tu'lu'. HablI'vam (ghaH ghajwI' je) lo'pu'bogh De' jengva'mey neH 'agh
+  tetlh, wIvlu'pu'; HablI' polghach ghajbe'bogh tetlh chIm tagh. *De' jengva' yIchel…* latlh
+  HablI'mey lo'pu'bogh polghach 'aplo'mey je nob.
 
 **HablI' Qagh pagh reH.** Hoch polghach 'aplo' HablI' Daj qaw `.phonebackup/phone.json`Daq
 (Segh, HablI' mI', HablI' ghun ngoq ID; polghachmey ngo'vaD ghun QInmey vo'
@@ -113,11 +127,8 @@ pagh Segh polghach pong rapbe'chugh, DaHarqang. ghItlh wa'DIch
 ret HablI' cha'logh ngu'lu' (HablI' choHlu'chugh polghach mev). HablI'
 rarbogh HablI' pong DaghuHmoHbogh choHbe' reH, 'ej HablI' USB tlheghDaq taHvIS latlh
 HablI' Wi-Fi Dung tlhaplu'be'. Harqang 'agh rarghach 'ej, nomqu'be'chugh,
-nom law'moHmeH mIw (tlhegh + USB debugging; USB 2 tlhegh Daq USB 3 tlhegh). wa' pagh law' yIwIv. *De' jengva' yIchel…* rarlu'bogh
-  pa' De' jengva'mey tetlh 'agh, De' jengva'mey rarlu'bogh 'ach chu'lu'be'bogh je (Linux: wa' Hot
-  Dung chu'lu', mu'ngoq poQbe'). *'aplo' yIchel…* 'aplo' wIvwI' poSmoH. De' jengva' wIvlu'bogh
-  rarlu'bogh 'ach chu'lu'be'bogh polghach taghDI' ghaH ta' chu'lu'. nuqDaq ghItlhmey jaH 'e'
-  lughbe'qu' 'agh. ADB Dung HablI' rarlu'DI' SIbI' ghaH ta' tu'lu'.
+nom law'moHmeH mIw (tlhegh + USB debugging; USB 2 tlhegh Daq USB 3 tlhegh).
+
 **polghachmey yIlo'…** loS tabmey ghaj:
 
 * **polghach ngo' yIlIH** – cha' mIw:
