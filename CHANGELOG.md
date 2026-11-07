@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.8.1] - 2026-11-07
+
+### Simpler "New backup" page (user request 2026-11-07)
+- **Phone connection:** a simple view by default – the connection status and, when it helps, a
+  tip below it. The speed overview, the connection buttons and *Switch … off after the backup*
+  are behind the new tick box **Advanced connection settings** (remembered). The program still
+  picks the fastest connection by itself.
+- **USB tips:** for a phone's first backup the program suggests the USB cable with USB debugging.
+  When USB debugging is off it says how much faster it would be (up to 50 MB/s instead of
+  10–20 MB/s), with *How to switch on USB debugging…* (the step-by-step guide for the phone's
+  brand) and *Continue without (slower file transfer)*.
+- **Backup destinations:** only the drives used before with this phone (and owner), already
+  ticked; a new phone starts with an empty list. *Add drive…* also offers the backup folders used
+  before with other phones.
+- **Start screen:** the button below *Your phones* now says *Remove ticked phones from list
+  (backups are kept)*, so it is clear what the tick boxes are for.
+- Manual updated in all languages.
+
 ## [0.9.8] - 2026-11-07
 
 ### Start screen menu (user request 2026-11-07)
