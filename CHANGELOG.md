@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.7] - 2026-11-07
 
 ### Security (open points of the 2026-11-06 review)
 - **Wi-Fi pairing can no longer be intercepted.** Before, somebody in the same Wi-Fi could read
