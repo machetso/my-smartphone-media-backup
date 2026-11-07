@@ -2,7 +2,7 @@
 
 APP_NAME = "My Smartphone Media Backup"
 
-__version__ = "0.9.7"
+__version__ = "0.9.8"
 
 
 def _start_language():

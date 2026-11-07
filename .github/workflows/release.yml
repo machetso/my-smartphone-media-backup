@@ -81,9 +81,11 @@ jobs:
             SEP=";"
             EXTRA="$EXTRA --hidden-import win32com.client --hidden-import pythoncom"
           fi
+          MANUALS=""                       # the manual in every language (README.<code>.md)
+          for f in README.*.md; do MANUALS="$MANUALS --add-data $f${SEP}."; done
           python -m PyInstaller --noconfirm --clean --onefile --windowed \
             --name "${{ matrix.binary }}" --exclude-module tkinter $EXTRA \
-            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" --add-data "assets/companion/MediaBackup.apk${SEP}assets/companion" --add-data "i18n${SEP}i18n" \
+            --icon assets/icon.ico --add-data "assets/icon.png${SEP}assets" --add-data "assets/icon.ico${SEP}assets" --add-data "assets/companion/MediaBackup.apk${SEP}assets/companion" --add-data "i18n${SEP}i18n" --add-data "README.md${SEP}." $MANUALS \
             smartphone_media_backup.py
 
       - name: Package

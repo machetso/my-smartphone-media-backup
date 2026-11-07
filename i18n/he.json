@@ -1368,6 +1368,11 @@
   "no update file for this system in the release": "אין קובץ עדכון למערכת הזו בגרסה",
   "unexpected content in the update file": "תוכן לא צפוי בקובץ העדכון",
   "Update cancelled.": "העדכון בוטל.",
-  "the download is larger than announced – not used": "ההורדה גדולה ממה שהוכרז – לא בשימוש"
+  "the download is larger than announced – not used": "ההורדה גדולה ממה שהוכרז – לא בשימוש",
+  "Menu": "תפריט",
+  "Manual": "מדריך",
+  "Program settings…": "הגדרות התוכנה…",
+  "About": "אודות",
+  "The manual was not found. It is on the project page: %s": "המדריך לא נמצא. הוא נמצא בדף הפרויקט: %s"
  }
 }

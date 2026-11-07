@@ -41,6 +41,39 @@ class GuiSmokeTest(unittest.TestCase):
 
 
     @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+    def test_start_screen_menu(self):
+        """Start screen menu (user request 2026-11-07): language list, manual, program settings."""
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": d, "APPDATA": d,
+                                                                             "PHONEBACKUP_LANG": ""}):
+            from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+            from phonebackup import gui, i18n
+            app = QApplication.instance() or QApplication([])
+            with mock.patch.object(gui, "find_adb", lambda cfg: None), \
+                    mock.patch.object(gui.MainWindow, "_offer_adb_download", lambda self: None), \
+                    mock.patch.object(gui.config, "save", lambda cfg: None), \
+                    mock.patch.object(QMessageBox, "exec", lambda box: 0), \
+                    mock.patch.object(QDialog, "exec", lambda dlg: 0):
+                w = gui.MainWindow()
+                try:
+                    codes = [a.data() for a in w._lang_actions.actions()]
+                    self.assertEqual(codes, [i18n.SYSTEM] + [l.code for l in i18n.languages()])
+                    self.assertIn("de", codes)
+                    w._menu_language("de")
+                    self.assertEqual(i18n.stored_choice(w.cfg), "de")
+                    self.assertEqual(w.lang_combo.currentData(), "de")
+                    self.assertEqual([a.data() for a in w._lang_actions.actions() if a.isChecked()], ["de"])
+                    self.assertIn("# My Smartphone Media Backup", gui.manual_text("de"))
+                    w._show_manual()
+                    w._open_program_settings()
+                    self.assertIs(w.pages.currentWidget(), w.more_page)
+                    self.assertEqual(w.tabs.tabText(w.tabs.currentIndex()), "Settings")
+                finally:
+                    i18n.use("en")
+                    w._stop.set()
+                    w.close()
+
+    @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
     def test_update_hint_and_drive_hotspot_message(self):
         """New version → a message with the download page; Google Drive + Direct Wi-Fi → the
         explanation instead of a network error (no real network, no real settings)."""

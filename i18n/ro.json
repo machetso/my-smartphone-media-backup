@@ -1368,6 +1368,11 @@
   "no update file for this system in the release": "niciun fișier de actualizare pentru acest sistem în versiune",
   "unexpected content in the update file": "conținut neașteptat în fișierul de actualizare",
   "Update cancelled.": "Actualizare anulată.",
-  "the download is larger than announced – not used": "descărcarea este mai mare decât s-a anunțat – nu este folosită"
+  "the download is larger than announced – not used": "descărcarea este mai mare decât s-a anunțat – nu este folosită",
+  "Menu": "Meniu",
+  "Manual": "Manual",
+  "Program settings…": "Setările programului…",
+  "About": "Despre",
+  "The manual was not found. It is on the project page: %s": "Manualul nu a fost găsit. Se află pe pagina proiectului: %s"
  }
 }

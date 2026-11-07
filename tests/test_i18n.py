@@ -57,3 +57,28 @@ class I18nTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManualTranslationsTest(unittest.TestCase):
+    """Every interface language has the manual (README.<code>.md) with the same headings and
+    code blocks as the English README (user request 2026-11-07)."""
+
+    @staticmethod
+    def _shape(text):
+        import re
+        heads = re.findall(r"^(#+) ", text, re.M)
+        fences = len(re.findall(r"^\s*```", text, re.M))
+        return heads, fences
+
+    def test_every_language_has_the_manual(self):
+        from pathlib import Path
+        from phonebackup import i18n
+        root = Path(__file__).resolve().parent.parent
+        english = self._shape((root / "README.md").read_text(encoding="utf-8"))
+        for lang in i18n.languages():
+            if lang.code == "en":
+                continue
+            with self.subTest(lang=lang.code):
+                f = root / f"README.{lang.code}.md"
+                self.assertTrue(f.is_file(), f"{f.name} missing")
+                self.assertEqual(self._shape(f.read_text(encoding="utf-8")), english)

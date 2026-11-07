@@ -1328,6 +1328,11 @@
   "no update file for this system in the release": "no hay archivo de actualización para este sistema en la versión",
   "unexpected content in the update file": "contenido inesperado en el archivo de actualización",
   "Update cancelled.": "Actualización cancelada.",
-  "the download is larger than announced – not used": "la descarga es más grande de lo anunciado – no se usa"
+  "the download is larger than announced – not used": "la descarga es más grande de lo anunciado – no se usa",
+  "Menu": "Menú",
+  "Manual": "Manual",
+  "Program settings…": "Ajustes del programa…",
+  "About": "Acerca de",
+  "The manual was not found. It is on the project page: %s": "No se encontró el manual. Está en la página del proyecto: %s"
  }
 }

@@ -15,13 +15,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QActionGroup, QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QApplication, QBoxLayout, QButtonGroup, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox,
-                               QSplitter, QStackedWidget, QStyle, QTabWidget, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QSplitter, QStackedWidget, QStyle, QTabWidget, QTextBrowser, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 from . import APP_NAME, __version__, config, i18n, ui
@@ -780,6 +780,20 @@ def gear_icon(color, size=64):
     return QIcon(pm)
 
 
+def manual_text(code="en"):
+    """The manual (README.<code>.md, else README.md) - next to the program or bundled in it."""
+    bases = [Path(getattr(sys, "_MEIPASS", "")), Path(__file__).resolve().parents[1],
+             Path(sys.executable).resolve().parent]
+    for name in ([f"README.{code}.md"] if code and code != "en" else []) + ["README.md"]:
+        for base in bases:
+            try:
+                if str(base) and (base / name).is_file():
+                    return (base / name).read_text(encoding="utf-8")
+            except OSError:
+                continue
+    return ""
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -919,7 +933,11 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(24, 18, 24, 12)
         name = QLabel(APP_NAME)
         name.setStyleSheet("font-size:22px;font-weight:700")
-        lay.addWidget(name)
+        head = QHBoxLayout()
+        head.addWidget(name)
+        head.addStretch()
+        head.addWidget(self._build_program_menu())
+        lay.addLayout(head)
         self.home_status = StatusBanner()
         lay.addWidget(self.home_status)
         lay.addSpacing(8)
@@ -975,6 +993,74 @@ class MainWindow(QMainWindow):
         row.addWidget(more)
         lay.addLayout(row)
         return w
+
+    def _build_program_menu(self):
+        """'Menu' at the top right of the start screen (user request 2026-11-07): language, manual
+        and the program settings - reachable right at the first start, not only via Manage backups."""
+        btn = QToolButton()
+        btn.setText("☰ " + tr("Menu"))
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        btn.setMinimumHeight(34)
+        btn.setAccessibleName(tr("Menu"))
+        menu = QMenu(btn)
+        lang_menu = menu.addMenu(tr("Language"))
+        group = QActionGroup(lang_menu)
+        stored = i18n.stored_choice(self.cfg)
+        choices = [(tr("System language (%s)", i18n.resolve(i18n.SYSTEM).name), i18n.SYSTEM)]
+        choices += [(lang.name, lang.code) for lang in i18n.languages()]
+        for label, code in choices:
+            act = lang_menu.addAction(label)
+            act.setCheckable(True)
+            act.setData(code)
+            act.setChecked(code == stored)
+            group.addAction(act)
+            act.triggered.connect(lambda _c=False, code=code: self._menu_language(code))
+        self._lang_actions = group
+        menu.addAction(tr("Manual"), self._show_manual)
+        menu.addAction(tr("Program settings…"), self._open_program_settings)
+        menu.addSeparator()
+        menu.addAction(tr("About"), self._show_about)
+        btn.setMenu(menu)
+        return btn
+
+    def _menu_language(self, code):
+        """Language from the start-screen menu: the same path as the combo box in Settings."""
+        idx = self.lang_combo.findData(code)
+        if idx >= 0 and idx != self.lang_combo.currentIndex():
+            self.lang_combo.setCurrentIndex(idx)       # → _choose_language (asks for the restart)
+        stored = i18n.stored_choice(self.cfg)
+        for act in self._lang_actions.actions():
+            act.setChecked(act.data() == stored)
+
+    def _open_program_settings(self):
+        self.tabs.setCurrentIndex(self.tabs.count() - 1)      # Settings is the last tab
+        self.pages.setCurrentWidget(self.more_page)
+
+    def _show_about(self):
+        QMessageBox.about(self, tr("About"), f"<b>{html.escape(APP_NAME)}</b> {html.escape(__version__)}<br>"
+                          "<a href='https://github.com/machetso/my-smartphone-media-backup'>"
+                          "github.com/machetso/my-smartphone-media-backup</a>")
+
+    def _show_manual(self):
+        """The README as the manual, in the chosen language if there is a README.<code>.md."""
+        text = manual_text(i18n.current().code)
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Manual"))
+        dlg.resize(820, 700)
+        lay = QVBoxLayout(dlg)
+        view = QTextBrowser()
+        view.setOpenExternalLinks(True)
+        if text:
+            view.setMarkdown(text)
+        else:
+            view.setPlainText(tr("The manual was not found. It is on the project page: %s",
+                                 "https://github.com/machetso/my-smartphone-media-backup"))
+        lay.addWidget(view, 1)
+        box = QDialogButtonBox(QDialogButtonBox.Close)
+        box.rejected.connect(dlg.reject)
+        lay.addWidget(box)
+        dlg.exec()
 
     def _go_home(self):
         self.pages.setCurrentWidget(self.home_page)

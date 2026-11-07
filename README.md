@@ -40,6 +40,8 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
 **New backup…** (another phone, or other folders / drives), **Backup settings…** and
 **Manage backups…** (the tabs below).
 
+**☰ Menu** (top right of the start screen, there from the very first start): **Language**, **Manual** (this text, in the chosen language), **Program settings…** and **About**.
+
 **Backup settings** (subpage):
 
 * **Phone connection** – the program **always uses the fastest connection it finds**; you do not

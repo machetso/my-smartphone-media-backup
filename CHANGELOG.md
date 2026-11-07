@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.8] - 2026-11-07
+
+### Start screen menu (user request 2026-11-07)
+- New **☰ Menu** at the top right of the start screen, there from the very first start:
+  **Language** (all languages, the current one ticked), **Manual**, **Program settings…** and
+  **About**. Before, the language could only be changed under *Manage backups… → Settings*.
+- **Manual** opens this README in the program window, in the chosen language: the manual is now
+  translated into all languages of the program (German, Spanish, French, Hebrew, Romanian,
+  Klingon) and built into the program, no internet needed.
+
 ## [0.9.7] - 2026-11-07
 
 ### Security (open points of the 2026-11-06 review)

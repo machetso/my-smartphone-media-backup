@@ -605,7 +605,7 @@
   "Read from copy:": "chIl vo' laD:",
   "The backup is on several drives – choose which copy is read": "polghach De' jengva' law'Daq ghaj – chIl yIwIv laDmeH",
   "Click the drive, folder or cloud storage to export to (a different drive than the backup).": "De' jengva', 'aplo' pagh cloud Daq yIHot lelmeH (polghach De' jengva' rap be').",
-  "Clean up old exports…": "lel ngo' yIpoSmoH…",
+  "Clean up old exports…": "lel ngo' yIteq…",
   "Shows the exports the Grandfather-Father-Son scheme no longer needs – they are only deleted after you confirm.": "vav'a'-vav-puqloD mIw poQbe'bogh lel 'aghmoH – DaHoch neH teqlu'.",
   "Start export": "lel yItagh",
   "new or empty folder": "'aplo' chu' pagh chIm",
@@ -1288,6 +1288,11 @@
   "no update file for this system in the release": "ghunDaq pat'vam chu'moH De' teywI' tu'lu'be'",
   "unexpected content in the update file": "chu'moH De' teywI'Daq Huj ngaS",
   "Update cancelled.": "chu'moH qIllu'.",
-  "the download is larger than announced – not used": "Suqbogh 'ab tIn law' maqlu'bogh tIn puS – lo'be'lu'"
+  "the download is larger than announced – not used": "Suqbogh 'ab tIn law' maqlu'bogh tIn puS – lo'be'lu'",
+  "Menu": "DIr",
+  "Manual": "ghojmeH paq",
+  "Program settings…": "ghunmeH mIw…",
+  "About": "De'",
+  "The manual was not found. It is on the project page: %s": "ghojmeH paq tu'lu'be'. jInmolDaq ghItlh: %s"
  }
 }
