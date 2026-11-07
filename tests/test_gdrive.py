@@ -297,5 +297,23 @@ class DriveLockTest(unittest.TestCase):
         self.a.release_lock()
 
 
+class OfflineTest(unittest.TestCase):
+    """No internet (e.g. Direct Wi-Fi hotspot) is DriveOffline - quick for the account display."""
+
+    def test_unreachable_network_is_offline_not_an_error(self):
+        calls = []
+
+        def transport(method, url, headers, body):
+            calls.append(url)
+            raise OSError(101, "Network is unreachable")
+
+        d = gdrive.Drive({}, transport=transport)
+        with mock.patch.object(gdrive.time, "sleep", lambda s: None):
+            with self.assertRaises(gdrive.DriveOffline):
+                d.account()
+        self.assertEqual(len(calls), 2)                  # no minute of retries for a display value
+        self.assertEqual(gdrive.DriveOffline("x").code, "offline")
+
+
 if __name__ == "__main__":
     unittest.main()

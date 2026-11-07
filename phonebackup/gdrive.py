@@ -82,6 +82,13 @@ class DriveError(Exception):
             self.code = code
 
 
+class DriveOffline(DriveError):
+    """No internet (e.g. while this computer runs the Direct Wi-Fi hotspot) - not a real error."""
+
+    def __init__(self, message):
+        super().__init__(message, "offline")
+
+
 class DriveBusy(DriveError):
     """Another computer / window is writing to the same Google Drive backups right now."""
 
@@ -252,7 +259,7 @@ def _post_form(url, fields):
         raise DriveError(tr("Google answered %s: %s", e.code,
                               e.read()[:300].decode(errors="replace")), "http") from None
     except (urllib.error.URLError, socket.timeout) as e:
-        raise DriveError(tr("No connection to Google (%s).", e), "offline") from None
+        raise DriveOffline(tr("No connection to Google (%s).", e)) from None
 
 
 # ------------------------------------------------------------------------------------------ API
@@ -300,7 +307,7 @@ class Drive:
             _save_token(self.tok)
         return self.tok["access_token"]
 
-    def call(self, method, url, params=None, body=None, headers=None, ok=(200,), raw=False):
+    def call(self, method, url, params=None, body=None, headers=None, ok=(200,), raw=False, attempts=7):
         if params:
             url += "?" + urllib.parse.urlencode(params)
         h = dict(headers or {})
@@ -308,7 +315,8 @@ class Drive:
             body = json.dumps(body).encode()
             h["Content-Type"] = "application/json; charset=UTF-8"
         delay = 1.0
-        for attempt in range(7):
+        last = attempts - 1
+        for attempt in range(attempts):
             h["Authorization"] = "Bearer " + self._access()
             try:
                 status, rh, data = self.transport(method, url, h, body)
@@ -323,7 +331,9 @@ class Drive:
                 return json.loads(data) if data else {}
             retry = status in (0, 429, 500, 502, 503, 504) or (
                 status == 403 and b"ateLimitExceeded" in data)
-            if not retry or attempt == 6:
+            if not retry or attempt == last:
+                if status == 0:                          # never reached Google: no internet
+                    raise DriveOffline(tr("No connection to Google (%s).", data[:200].decode(errors="replace")))
                 if status == 403 and b"storageQuotaExceeded" in data:
                     raise DriveFull()
                 if status == 401:
@@ -335,7 +345,8 @@ class Drive:
 
     # --- account
     def account(self):
-        a = self.call("GET", f"{API}/about", {"fields": "user(emailAddress),storageQuota(limit,usage)"})
+        a = self.call("GET", f"{API}/about", {"fields": "user(emailAddress),storageQuota(limit,usage)"},
+                      attempts=2)                    # only for display: do not wait a minute offline
         q = a.get("storageQuota", {})
         lim = int(q["limit"]) if q.get("limit") else None          # None = unlimited
         use = int(q.get("usage", 0))

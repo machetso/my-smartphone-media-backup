@@ -40,6 +40,44 @@ class GuiSmokeTest(unittest.TestCase):
                     w.close()
 
 
+    @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+    def test_update_hint_and_drive_hotspot_message(self):
+        """New version → a message with the download page; Google Drive + Direct Wi-Fi → the
+        explanation instead of a network error (no real network, no real settings)."""
+        import time
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": d,
+                                                                             "APPDATA": d}):
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            from phonebackup import gui, updatecheck, wireless
+            app = QApplication.instance() or QApplication([])
+            shown = []
+
+            def fake_exec(box):
+                shown.append((box.windowTitle(), box.text()))
+                return 0
+            url = f"https://github.com/{updatecheck.REPO}/releases/tag/v99.0"
+            with mock.patch.object(gui.MainWindow, "_offer_adb_download", lambda self: None), \
+                    mock.patch.object(QMessageBox, "exec", fake_exec), \
+                    mock.patch.object(wireless, "hotspot_active", lambda: False), \
+                    mock.patch.object(updatecheck, "check", lambda cfg: ("99.0", url)):
+                w = gui.MainWindow()
+                w._check_for_update()
+                for _ in range(100):
+                    app.processEvents()
+                    if shown:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(shown[0][0], "New version available")
+                self.assertIn("99.0", shown[0][1])
+                shown.clear()
+                with mock.patch.object(wireless, "hotspot_active", lambda: True):
+                    self.assertTrue(w._gdrive_blocked_by_hotspot())
+                self.assertEqual(shown[0][0], "Google Drive needs the internet")
+                self.assertFalse(w._gdrive_blocked_by_hotspot())
+                w.close()
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -13,6 +13,16 @@ Windows: download `My-Smartphone-Media-Backup-v….exe` and double-click it (or 
 README and license); Linux: the `.tar.gz`.
 See [CHANGELOG.md](CHANGELOG.md) for what is new.
 
+**Updates:** at start the program looks whether a newer version is out (once a day; can be
+switched off in Settings) and offers **Update now** or **Not now**. *Update now* downloads the new
+version, checks that it is signed with the project's release key, swaps the program and restarts
+it – settings, drives, phones and pairings stay. If the new version does not start, the old one is
+put back automatically. (Started from the source code: update with `git pull` instead.)
+
+**Making a release (maintainer):** push the tag → GitHub Actions builds the draft release →
+`python3 tools/sign_release.py sign vX.Y.Z` on the maintainer's computer (adds the signed
+`update-manifest.json`; the private key never goes to GitHub) → publish the release.
+
 ## Start from source
 
 **Graphical interface** (needs PySide6):

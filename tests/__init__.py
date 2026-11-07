@@ -18,6 +18,7 @@ for _var, _sub in (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("X
     os.makedirs(os.path.join(_SANDBOX, _sub), exist_ok=True)
     os.environ[_var] = os.path.join(_SANDBOX, _sub)
 os.environ["PHONEBACKUP_NO_ADB_OFFER"] = "1"
+os.environ["PHONEBACKUP_NO_UPDATE_CHECK"] = "1"   # tests never ask GitHub
 os.environ["PHONEBACKUP_LANG"] = "en"          # tests check English texts; i18n tests switch explicitly
 os.environ["PHONEBACKUP_TEST_SANDBOX"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, ignore_errors=True)

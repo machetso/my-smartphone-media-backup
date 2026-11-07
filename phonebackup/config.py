@@ -14,6 +14,7 @@ DEFAULTS = {
     "adb_wait_seconds": 20,      # how long to wait for the phone to appear via ADB
     "fsync": True,               # force data onto the disk before verifying
     "keep_awake": True,
+    "update_check": True,        # look for a newer version on GitHub at start (at most once a day)
     "wifi_last_address": "",     # ip:port of the last wireless-debugging connection
     "hotspot_ssid": "",          # direct Wi-Fi (laptop hotspot), generated on first use
     "hotspot_password": "",          # block standby/shutdown while a job runs

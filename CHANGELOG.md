@@ -21,6 +21,27 @@
   now makes the second one wait with a clear message (a left-over marker after a crash expires
   after 15 minutes).
 
+### One-click update (user request 2026-11-07)
+- At start the program looks on GitHub whether a newer version is out (at most once a day) and
+  offers **Update now** or **Not now**. Nothing about the computer, the phone or the backups is
+  sent; no internet or Direct Wi-Fi is simply ignored. Can be switched off in **Settings**
+  ("Check for a new version at start").
+- **Update now** (Windows .exe and Linux program): downloads the new version, checks it against a
+  list signed with the project's release key (Ed25519; the key is not on GitHub, so even a
+  taken-over GitHub account cannot push an update), refuses older versions, swaps the program and
+  restarts. If the new version does not open its window within two minutes, the old one is put
+  back and started again. Started from the source code: the message links to the download page.
+- Works from 0.9.7 on: the first automatic update will be 0.9.7 → the next version.
+
+### Direct Wi-Fi and Google Drive
+- **No more "Network is unreachable (101)" during Direct Wi-Fi:** while the computer runs its own
+  hotspot it has no internet, so the program no longer asks Google for the Drive free space. The
+  Google Drive row shows "no internet right now (not needed for backups)" and checks again by itself.
+- **Google Drive actions explain why they cannot work with Direct Wi-Fi on** (export, clean-up,
+  restore, sign-in): the computer is not in the normal Wi-Fi, so there is no internet. The message
+  shows the two steps (back up over Direct Wi-Fi, then switch it off and export) and offers to
+  switch Direct Wi-Fi off right away.
+
 ### Faster / more reliable
 - The read-back check after copying now really reads from the drive (Linux: the just-written data
   is dropped from RAM first).

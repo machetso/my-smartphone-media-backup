@@ -378,8 +378,12 @@ class LocationList(QWidget):
                 email = gdrive.signed_in_email()
                 info = self.cloud_info.get(p) or {}
                 it.setText(0, f"Google Drive ({email})" if email else "Google Drive")
-                it.setText(1, tr("signed in") if email else tr("not signed in – click “Add to cloud storage”"))
-                it.setForeground(1, QColor(GREEN if email else ORANGE))
+                if email and info.get("offline"):
+                    it.setText(1, tr("signed in – no internet right now (not needed for backups)"))
+                    it.setForeground(1, QColor(GRAY))
+                else:
+                    it.setText(1, tr("signed in") if email else tr("not signed in – click “Add to cloud storage”"))
+                    it.setForeground(1, QColor(GREEN if email else ORANGE))
                 free = info.get("free") if email and info.get("email") == email else None
                 it.setText(2, ui.human_size(free) if free is not None else
                            (tr("no limit") if email and info.get("email") == email else "–"))
@@ -860,6 +864,8 @@ class MainWindow(QMainWindow):
         self.timer.start(3000)
         if not os.environ.get("PHONEBACKUP_NO_ADB_OFFER"):
             QTimer.singleShot(1500, self._offer_adb_download)     # ADB missing → ask once
+        if not os.environ.get("PHONEBACKUP_NO_UPDATE_CHECK"):
+            QTimer.singleShot(4000, self._check_for_update)       # newer version on GitHub?
         threading.Thread(target=self._adb_poller, daemon=True).start()
         lastbackup.discover(self.cfg)          # backups on the drives made before the phone list
         self._update_preview()
@@ -1636,6 +1642,10 @@ class MainWindow(QMainWindow):
                                         "power settings stay unchanged)"))
         self.awake_check.setChecked(bool(self.cfg.get("keep_awake", True)))
         form.addRow("", self.awake_check)
+        self.update_check = WrapCheck(tr("Check for a new version at start (once a day, asks GitHub – "
+                                         "nothing about you or your backups is sent)"))
+        self.update_check.setChecked(bool(self.cfg.get("update_check", True)))
+        form.addRow("", self.update_check)
         save = QPushButton(tr("Save settings"))
         save.clicked.connect(self._save_settings)
         form.addRow("", save)
@@ -2883,6 +2893,8 @@ class MainWindow(QMainWindow):
             self.export_targets.add_cloud(GDRIVE)
             self._gdrive_refresh_account()
             return
+        if self._gdrive_blocked_by_hotspot():          # the sign-in page is on the internet too
+            return
         if QMessageBox.question(
                 self, tr("Add Google Drive"),
                 tr("The backup is mirrored to Google Drive: same year/month folders in "
@@ -2930,8 +2942,13 @@ class MainWindow(QMainWindow):
             return
 
         def get():
+            # Direct Wi-Fi: this computer IS the network – no internet, nothing to ask Google
+            if wireless.hotspot_active():
+                return {"offline": True}
             try:
                 return gdrive.Drive(self.cfg).account()
+            except gdrive.DriveOffline:
+                return {"offline": True}
             except gdrive.DriveError as e:
                 return {"error": str(e)}
 
@@ -2940,6 +2957,16 @@ class MainWindow(QMainWindow):
     def _gdrive_account_done(self, acct):
         if acct and "error" in acct:
             ui.warn(tr("Google Drive: %s", acct['error']))
+        elif acct and acct.get("offline"):
+            # not an error (backups need no internet) – just look again in a minute
+            self.export_targets.cloud_info[GDRIVE] = acct
+            if not getattr(self, "_gdrive_retry", False):
+                self._gdrive_retry = True
+
+                def again():
+                    self._gdrive_retry = False
+                    self._gdrive_refresh_account()
+                QTimer.singleShot(60_000, again)
         else:
             self.export_targets.cloud_info[GDRIVE] = acct
         self.export_targets.update_status()
@@ -2966,6 +2993,8 @@ class MainWindow(QMainWindow):
                 return gdrive_gfs.runs_of(name, self.cfg)
             except getattr(gdrive_gfs, "NoGfsBackup", ()):    # by type, not by its (translated) text
                 return [], {}
+            except gdrive.DriveOffline:
+                return {"offline": True}
             except gdrive.DriveError as e:
                 if "No Grandfather-Father-Son backup" in str(e):
                     return [], {}
@@ -2973,7 +3002,8 @@ class MainWindow(QMainWindow):
 
         def done(res):
             if isinstance(res, dict):
-                ui.warn(tr("Google Drive: %s", res['error']))
+                if "error" in res:                   # offline: nothing to report
+                    ui.warn(tr("Google Drive: %s", res['error']))
                 self._gdrive_runs.pop(name, None)
                 return
             self._gdrive_runs[name] = res
@@ -3044,7 +3074,38 @@ class MainWindow(QMainWindow):
         self.export_hint.setText("<br>".join(info + [f"<span style='color:{ORANGE}'>{html.escape(h)}</span>"
                                                      for h in warn]))
 
+    def _gdrive_blocked_by_hotspot(self):
+        """Google Drive is on the internet; with Direct Wi-Fi on, this computer has none. Explain
+        it (and offer to switch Direct Wi-Fi off) instead of failing with a network error.
+        Returns True when the Google Drive action must not start now."""
+        if not wireless.hotspot_active():
+            return False
+        box = QMessageBox(QMessageBox.Information, tr("Google Drive needs the internet"), tr(
+            "Direct Wi-Fi is on: this computer is running its own Wi-Fi network for the phone, so it "
+            "is not in your normal Wi-Fi at the moment – and has no internet connection. Google Drive "
+            "is on the internet, so it cannot be reached now.\n\n"
+            "Do it in two steps:\n"
+            "1. Back up the phone over Direct Wi-Fi (that needs no internet).\n"
+            "2. Switch Direct Wi-Fi off – the computer goes back to your normal Wi-Fi – and then "
+            "start the Google Drive action again."), parent=self)
+        off = box.addButton(tr("Switch Direct Wi-Fi off now"), QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        if box.clickedButton() is off:
+            def done(res):
+                ok, msg = res
+                if ok:
+                    ui.ok(tr("Direct Wi-Fi is off. As soon as the computer is back in your normal "
+                             "Wi-Fi, start the Google Drive action again."))
+                else:
+                    ui.warn(tr("Direct Wi-Fi could not be switched off: %s", msg))
+                self._gdrive_refresh_account()
+            self.run_job(wireless.stop_hotspot, done, busy=False)
+        return True
+
     def _start_gdrive_export(self, src):
+        if self._gdrive_blocked_by_hotspot():
+            return
         if not gdrive.signed_in_email():
             QMessageBox.warning(self, tr("Cannot start yet"), tr("Sign in to Google Drive first "
                                 "(“Add to cloud storage” → Google Drive)."))
@@ -3092,6 +3153,8 @@ class MainWindow(QMainWindow):
                                      after_export):
             return
         ids = [r.id for r in retire]
+        if self._gdrive_blocked_by_hotspot():
+            return
         ui.title(tr("Clean up Google Drive: %s", gdrive_gfs.folder_name(name)))
 
         def done(res):
@@ -3353,6 +3416,8 @@ class MainWindow(QMainWindow):
         run_id = it.data(Qt.UserRole)
         if run_id is None:
             return
+        if tparent.startswith(gdrive_gfs.PREFIX) and self._gdrive_blocked_by_hotspot():
+            return
         self.last_folder = dest
         ui.title(tr("Restore into %s", dest))
         if tparent.startswith(gdrive_gfs.PREFIX):
@@ -3441,6 +3506,108 @@ class MainWindow(QMainWindow):
         ui.title(tr("Download ADB"))
         self.run_job(lambda: download_adb(cancel=self.cancel_event), self._adb_downloaded)
 
+    def _check_for_update(self):
+        from . import updatecheck
+        if not updatecheck.due(self.cfg):
+            return
+
+        def job():
+            if wireless.hotspot_active():            # Direct Wi-Fi: no internet – next start
+                return None
+            before = self.cfg.get("update_checked_at")
+            found = updatecheck.check(self.cfg)
+            if self.cfg.get("update_checked_at") != before:
+                config.save(self.cfg)
+            return found
+
+        def done(found):
+            if not found:
+                return
+            version, url = found
+            ui.info(tr("A new version is available: %s (this is %s) – %s", version, __version__, url))
+            if self.busy:                            # never interrupt a running job with a dialog
+                return
+            self._offer_update(version, url)
+
+        self.run_job(job, done, busy=False)
+
+    def _offer_update(self, version, url):
+        from . import selfupdate
+        exe = selfupdate.program()
+        title = tr("New version available")
+        if exe is not None:
+            text = tr("%s %s is available (you have %s).\n\nUpdate now? The program downloads the new "
+                      "version, checks that it really comes from the project (signature) and restarts. "
+                      "Your settings, drives, phones and pairings stay.", APP_NAME, version, __version__)
+            yes_text = tr("Update now")
+        else:                                        # source code / other system: by hand
+            text = tr("%s %s is available (you have %s).\n\nWhat is new and the downloads for Windows and "
+                      "Linux are on the release page. To update, replace the program with the new one – your "
+                      "settings, drives, phones and pairings stay.", APP_NAME, version, __version__)
+            yes_text = tr("Open download page")
+        box = QMessageBox(QMessageBox.Information, title, text, parent=self)
+        yes = box.addButton(yes_text, QMessageBox.AcceptRole)
+        box.addButton(tr("Not now"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not yes:
+            return
+        if exe is None:
+            QDesktopServices.openUrl(QUrl(url))
+            return
+        self._update_now(exe)
+
+    def _update_now(self, exe):
+        from . import selfupdate
+        ui.title(tr("Update"))
+        ui.info(tr("Downloading the new version from GitHub and checking its signature …"))
+        prog = {}
+
+        def job():
+            def on_size(n):
+                prog["p"] = ui.Progress(1, n)
+
+            def on_bytes(n):
+                if "p" in prog:
+                    prog["p"].update(add_bytes=n, current=tr("Update"))
+            res = selfupdate.prepare(exe, on_bytes=on_bytes, cancel=self.cancel_event, on_size=on_size)
+            if "p" in prog:
+                prog["p"].finish()
+            return res
+
+        self.run_job(job, lambda res: self._install_update(exe, *res))
+
+    def _install_update(self, exe, version, staged):
+        """The new program is downloaded and verified: swap, start it, wait for its window."""
+        import tempfile
+        from . import selfupdate
+        config.save(self.cfg)
+        try:
+            prev = selfupdate.install(exe, staged)
+        except OSError as e:
+            Path(staged).unlink(missing_ok=True)
+            QMessageBox.warning(self, tr("Update"), tr("The update could not be installed: %s", e))
+            return
+        app = QApplication.instance()
+        app.setQuitOnLastWindowClosed(False)
+        if not self.close():                         # e.g. the user kept Direct Wi-Fi dialog open
+            selfupdate.rollback(exe, prev)
+            app.setQuitOnLastWindowClosed(True)
+            return
+        marker = Path(tempfile.gettempdir()) / f"phonebackup-update-{os.getpid()}.ok"
+        marker.unlink(missing_ok=True)
+        try:
+            proc = selfupdate.start(exe, {selfupdate.MARKER_ENV: str(marker)})
+            ok = selfupdate.wait_started(proc, marker)
+        except OSError:
+            proc, ok = None, False
+        marker.unlink(missing_ok=True)
+        if not ok:                                   # the new version did not come up: back to this one
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            selfupdate.rollback(exe, prev)
+            selfupdate.start(exe, {selfupdate.FAILED_ENV: version})
+        app.quit()
+
     def _adb_downloaded(self, res):
         path, version = res
         self.adb_custom = ""             # the downloaded adb is found automatically
@@ -3462,6 +3629,7 @@ class MainWindow(QMainWindow):
         self.cfg["adb_wait_seconds"] = self.wait_spin.value()
         self.cfg["fsync"] = self.fsync_check.isChecked()
         self.cfg["keep_awake"] = self.awake_check.isChecked()
+        self.cfg["update_check"] = self.update_check.isChecked()
         config.save(self.cfg)
         if hasattr(self, "adb_status"):
             self._update_adb_hint()
@@ -3547,8 +3715,17 @@ def main():
     app.setStyle("Fusion")
     if i18n.current().rtl:               # right-to-left interface language
         app.setLayoutDirection(Qt.RightToLeft)
+    from . import selfupdate
+    selfupdate.clean_previous()          # old version kept by an update that worked
     w = MainWindow()
     w.show()
+    QTimer.singleShot(1500, selfupdate.report_started)   # "the new version runs" after an update
+    failed = os.environ.pop(selfupdate.FAILED_ENV, "")
+    if failed:
+        QTimer.singleShot(800, lambda: QMessageBox.warning(w, tr("Update"), tr(
+            "Version %s did not start on this computer, so this version (%s) was put back. Your "
+            "settings are unchanged. You can download the new version by hand from the release page.",
+            failed, __version__)))
     return app.exec()
 
 
