@@ -10,6 +10,7 @@ No Qt here: the GUI (`gui_setup.py`) shows it. Contents:
   for any other phone.
 """
 
+import glob
 import os
 import re
 import subprocess
@@ -231,6 +232,10 @@ def _linux_usb_phones(sysfs="/sys/bus/usb/devices"):
         vendor = _read(dev / "idVendor").lower()
         if vendor not in PHONE_VENDORS:
             continue
+        # a drive of a phone maker (e.g. Samsung T7 SSD): only mass-storage interfaces (class 08)
+        classes = {_read(i / "bInterfaceClass").lower() for i in Path(sysfs).glob(glob.escape(dev.name) + ":*")}
+        if classes and classes <= {"08"}:
+            continue
         maker = _read(dev / "manufacturer") or PHONE_VENDORS[vendor]
         product = _read(dev / "product")
         if product and re.fullmatch(r"(?i)[a-z]+[ _-]?(android|mtp|adb)( device)?", product):
@@ -247,14 +252,26 @@ def _windows_usb_phones():
     ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell",
                       "v1.0", "powershell.exe")
     cmd = [ps, "-NoProfile", "-Command",
-           "Get-PnpDevice -Class WPD -PresentOnly | Select-Object -ExpandProperty FriendlyName"]
+           "Get-PnpDevice -Class WPD -PresentOnly | ForEach-Object { $_.InstanceId + [char]9 + $_.FriendlyName }"]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=15, creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return []
-    names = [ln.strip() for ln in r.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
-    # drives / cameras also appear as WPD: keep what looks like a phone
-    return [n for n in names if not re.fullmatch(r"[A-Z]:\\?|.*\b(USB|Disk|Drive)\b.*", n)]
+    return _wpd_phones(r.stdout.decode("utf-8", "replace"))
+
+
+def _wpd_phones(text):
+    """Phones in the list of "portable devices" ("InstanceId<TAB>FriendlyName" per line).
+
+    Windows also lists every USB drive there, by its name ("Backup Disk", "My Passport") - those
+    are volumes (InstanceId SWD\\WPDBUSENUM\\…, bug report 2026-11-07). A phone in file-transfer
+    mode is the USB device itself (InstanceId USB\\VID_…)."""
+    out = []
+    for ln in text.splitlines():
+        inst, _tab, name = ln.strip().partition("\t")
+        if inst.upper().startswith("USB\\VID_") and name.strip():
+            out.append(name.strip())
+    return out
 
 
 def detect_usb_phone():

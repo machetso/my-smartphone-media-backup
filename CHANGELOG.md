@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.8.2] - 2026-11-07
+
+### Fixed
+- **Windows: a USB hard disk was taken for a phone.** With a USB drive connected (e.g. a WD drive
+  named "Backup Disk") the program warned that a phone was on the cable with USB debugging off.
+  Windows lists drives as "portable devices" too; the program now only counts real USB devices
+  as phones, never drive volumes, whatever their name.
+- Linux: a drive of a phone maker (e.g. a Samsung portable SSD) is no longer taken for a phone.
+
 ## [0.9.8.1] - 2026-11-07
 
 ### Simpler "New backup" page (user request 2026-11-07)

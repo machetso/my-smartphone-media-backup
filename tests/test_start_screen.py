@@ -80,6 +80,30 @@ class SetupGuideTest(unittest.TestCase):
                 (p / "product").write_text(product)
             self.assertEqual(adbsetup._linux_usb_phones(d), ["Google Pixel 10 Pro"])
 
+    def test_drive_is_not_a_phone_windows(self):
+        """Bug 2026-11-07: a WD USB drive "Backup Disk" was taken for a phone without USB
+        debugging - Windows lists drives as portable devices too."""
+        text = ("SWD\\WPDBUSENUM\\_??_USBSTOR#DISK&VEN_WD&PROD_ELEMENTS_10B8#575833#{53F56307}\t"
+                "Backup Disk\r\n"
+                "SWD\\WPDBUSENUM\\{8F5A2C1E-1234}#0000000000100000\tE:\\\r\n"
+                "USB\\VID_04E8&PID_6860&MS_COMP_MTP&SAMSUNG_ANDROID\\6&2A3B&0&0000\tGalaxy S20 FE\r\n")
+        self.assertEqual(adbsetup._wpd_phones(text), ["Galaxy S20 FE"])
+        self.assertEqual(adbsetup._wpd_phones(text.splitlines()[0]), [])
+
+    def test_drive_is_not_a_phone_linux(self):
+        """A drive of a phone maker (Samsung T7 SSD, vendor 04e8) is not a phone."""
+        with tempfile.TemporaryDirectory() as d:
+            for name, product, cls in (("2-1", "Portable SSD T7", "08"), ("2-2", "SAMSUNG_Android", "ff")):
+                p = Path(d) / name
+                p.mkdir()
+                (p / "idVendor").write_text("04e8")
+                (p / "manufacturer").write_text("Samsung")
+                (p / "product").write_text(product)
+                i = Path(d) / f"{name}:1.0"
+                i.mkdir()
+                (i / "bInterfaceClass").write_text(cls)
+            self.assertEqual(adbsetup._linux_usb_phones(d), ["Samsung phone"])
+
 
 class ControlCommandTest(unittest.TestCase):
     def test_only_fixed_commands(self):
