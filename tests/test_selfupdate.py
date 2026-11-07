@@ -124,7 +124,8 @@ class PrepareInstallTest(unittest.TestCase):
     def test_linux_and_windows_files(self):
         version, staged = self.prepare(FakeGitHub(b"NEW LINUX"))
         self.assertEqual(staged.read_bytes(), b"NEW LINUX")
-        self.assertTrue(os.stat(staged).st_mode & stat.S_IXUSR)
+        if not sys.platform.startswith("win"):           # Windows has no "executable" bit
+            self.assertTrue(os.stat(staged).st_mode & stat.S_IXUSR)
         _v, staged = self.prepare(FakeGitHub(b"NEW WINDOWS", sysname="windows"), "windows")
         self.assertEqual(staged.read_bytes(), b"NEW WINDOWS")
         self.assertEqual(self.exe.read_bytes(), b"OLD PROGRAM")        # not swapped yet
