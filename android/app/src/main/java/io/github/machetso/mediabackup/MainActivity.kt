@@ -122,12 +122,16 @@ class MainActivity : ComponentActivity() {
             if (data?.scheme == "phonebackup" && data.host == "pair") {
                 setIntent(Intent())
                 pairCode = null
-                usbInfo = tr("Pairing link refused: the computer must be in your local network.")
+                val t = data.getQueryParameter("t").orEmpty()
+                usbInfo = if (t.isNotEmpty() && !Regex("[0-9a-f]{64}").matches(t))
+                    tr("This computer program is too old for the app. Update “My Smartphone Media Backup” on the computer, then try again.")
+                else tr("Pairing link refused: the computer must be in your local network.")
             }
             return
         }
         setIntent(Intent())          // do not pair again on rotation
-        pairCode = p.code
+        pairCode = ""                // card shows "waiting for the computer's code" until revealed
+        pairReady = false
         if (!MediaIndex.hasLocalNetwork(this)) {
             waitingPair = p
             pairInfo = tr("Allow access to the local network first (button below).")
@@ -143,8 +147,19 @@ class MainActivity : ComponentActivity() {
         thread {
             var tries = 0
             while (BackupService.server?.port.let { it == null || it == 0 } && tries++ < 50) Thread.sleep(100)
-            val err = Pairing.announce(this, p, BackupService.server?.port ?: 0)
+            var err = Pairing.announce(this, p, BackupService.server?.port ?: 0)
+            if (err == null) {
+                runOnUiThread { pairInfo = tr("Waiting for the code from %s …", p.pcName) }
+                // the computer now hands over its key over the encrypted connection (/reveal)
+                val until = System.currentTimeMillis() + 40_000
+                while (p.code == null && Pairing.pending === p && System.currentTimeMillis() < until) Thread.sleep(200)
+                if (p.code == null && Pairing.pending === p) {
+                    err = tr("The computer did not send its code. Update the program on the computer, then try again.")
+                }
+            }
             runOnUiThread {
+                if (Pairing.pending !== p) return@runOnUiThread          // cancelled meanwhile
+                pairCode = p.code ?: ""
                 pairInfo = err ?: tr("Does “%s” show exactly the same code?", p.pcName)
                 pairReady = err == null
             }
@@ -209,8 +224,10 @@ class MainActivity : ComponentActivity() {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(tr("Pairing"), fontWeight = FontWeight.SemiBold)
-                        Text(code.chunked(3).joinToString(" "), fontSize = 40.sp,
-                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        if (code.isNotEmpty()) {
+                            Text(code.chunked(3).joinToString(" "), fontSize = 40.sp,
+                                fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
                         Text(pairInfo)
                         if (pairReady) {
                             Text(tr("Only tap “Pair” if you started the pairing yourself and the " +

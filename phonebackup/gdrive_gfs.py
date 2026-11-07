@@ -92,10 +92,22 @@ def reports_dir(set_name) -> Path:
 class DriveSet:
     """One phone's GFS folder on Google Drive + the local working copy of its catalog."""
 
-    def __init__(self, drive, set_name, create=True):
+    def __init__(self, drive, set_name, create=True, write=True):
         self.drive, self.name = drive, set_name
         root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
         self.root = root
+        self._locked = False
+        if write:                                    # one writer per Google Drive (DriveLock)
+            drive.hold_lock(root)
+            self._locked = True
+        try:
+            self._open(drive, set_name, root, create)
+        except BaseException:
+            self.close()
+            raise
+
+    def _open(self, drive, set_name, root, create):
+        self.local = None
         if create:
             self.id = drive.find_or_create_folder(folder_name(set_name), root)
         else:
@@ -122,7 +134,11 @@ class DriveSet:
         return Catalog(self.local)
 
     def close(self):
-        shutil.rmtree(self.local, ignore_errors=True)
+        if self.local is not None:
+            shutil.rmtree(self.local, ignore_errors=True)
+        if self._locked:
+            self._locked = False
+            self.drive.release_lock()
 
     def orphans(self, known_folders):
         """Export folders on Google Drive that the catalog does not know (an export that stopped
@@ -220,7 +236,7 @@ def list_sets(drive):
 
 def runs_of(set_name, cfg, drive=None):
     """(runs, storage used per run id) of a GFS backup on Google Drive."""
-    ds = DriveSet(drive or Drive(cfg), set_name, create=False)
+    ds = DriveSet(drive or Drive(cfg), set_name, create=False, write=False)
     cat = ds.catalog()
     try:
         runs = cat.runs()

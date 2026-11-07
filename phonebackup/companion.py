@@ -6,9 +6,16 @@ while "backup mode" is on; this module talks to it:
 * CompanionSource  - a source like AdbSource (list, SHA-256 on the phone, stream files).
 * SetupServer      - small HTTP server on the computer: the QR code opens its page, which offers the
                      app (APK) for download and the "Connect app" link that starts the pairing.
-* Pairing          - the phone sends its certificate fingerprint; both show the same 6-digit code;
-                     after the user confirms, the computer claims a secret over TLS with the
-                     fingerprint pinned. Afterwards every request carries that secret.
+* Pairing          - commit-then-reveal (like Bluetooth "numeric comparison"): the QR link only
+                     carries token = SHA-256(key); the phone answers with its certificate
+                     fingerprint and a random nonce; the computer then reveals the key over TLS
+                     pinned to that fingerprint. Both show code(key, fingerprint, nonce); after
+                     the user confirmed it on BOTH, the computer claims a secret with the key.
+                     Afterwards every request carries that secret.
+                     Why: the link and /pair travel as plain HTTP. Somebody listening in the
+                     Wi-Fi sees the token but never the key (so cannot claim the secret), and a
+                     man in the middle has to fix his values before he learns the key / the
+                     phone's nonce - the codes then differ (1 : 1,000,000).
 """
 
 import asyncio
@@ -38,8 +45,8 @@ from .sources import SourceFile, _dedupe, _run
 
 SERVICE_TYPE = "_phonebkp._tcp"
 APP_PACKAGE = "io.github.machetso.mediabackup"
-APP_VERSION_CODE = 8          # versionCode of the bundled assets/companion/MediaBackup.apk
-APP_VERSION_NAME = "0.5.0"    # its versionName (shown before installing)
+APP_VERSION_CODE = 9          # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_NAME = "0.6.0"    # its versionName (shown before installing)
 APP_NAME = "My Media Backup"
 DEFAULT_PORT = 47823
 SETUP_PORT = 47824
@@ -132,6 +139,20 @@ def pairing_code(token, fingerprint):
     """Same as Identity.pairingCode on the phone."""
     d = hashlib.sha256(f"{token}:{fingerprint}".encode()).digest()
     return "%06d" % (int.from_bytes(d[:4], "big") % 1_000_000)
+
+
+def pairing_code_v2(key, fingerprint, nonce):
+    """Wi-Fi pairing code - same as Identity.pairingCodeV2 on the phone."""
+    return pairing_code(f"v2:{key}", f"{fingerprint}:{nonce}")
+
+
+def token_for(key):
+    """The public commitment to the pairing key (travels in the QR link / setup page)."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _is_nonce(v):
+    return isinstance(v, str) and 16 <= len(v) <= 128 and all(c in "0123456789abcdef" for c in v)
 
 
 def pc_identity(cfg):
@@ -746,19 +767,24 @@ class PairRequest:
     manufacturer: str
     android: str
     code: str = ""
+    nonce: str = ""
+    outdated: bool = False  # phone app from before 0.6.0 (no nonce): it must be updated first
     done: threading.Event = field(default_factory=threading.Event)
 
 
 class SetupServer:
     """Serves the setup page + APK and receives the phone's pairing request.
 
-    on_pair_request(PairRequest) is called from a server thread.
+    on_pair_request(PairRequest) is called from a server thread; on_error(text) when the key
+    could not be handed to the phone (the phone then never shows a code).
     """
 
-    def __init__(self, cfg, on_pair_request, port=SETUP_PORT):
+    def __init__(self, cfg, on_pair_request, port=SETUP_PORT, on_error=None):
         self.cfg = cfg
         self.on_pair_request = on_pair_request
-        self.token = secrets.token_urlsafe(18)
+        self.on_error = on_error
+        self.key = secrets.token_hex(32)          # never leaves the computer except over pinned TLS
+        self.token = token_for(self.key)
         self.pc_id, self.pc_name = pc_identity(cfg)
         self.apk = apk_path()
         self.httpd = None
@@ -830,7 +856,14 @@ class SetupServer:
                     req = PairRequest(server.token, fp, f"{self.client_address[0]}:{int(d['port'])}",
                                       str(d.get("phone_id", "")), str(d.get("model", "")),
                                       str(d.get("manufacturer", "")), str(d.get("android", "")))
-                    req.code = pairing_code(server.token, fp)
+                    nonce = d.get("nonce")
+                    if nonce is None:
+                        req.outdated = True
+                    elif not _is_nonce(nonce):
+                        raise ValueError("bad nonce")
+                    else:
+                        req.nonce = nonce
+                        req.code = pairing_code_v2(server.key, fp, nonce)
                 except (ValueError, KeyError, TypeError):
                     return self._send(400, b'{"error":"bad request"}', "application/json")
                 with server._lock:
@@ -839,7 +872,10 @@ class SetupServer:
                                           "application/json")
                     server._paired = True
                 server.on_pair_request(req)
+                if req.outdated:
+                    return self._send(426, b'{"error":"update the phone app"}', "application/json")
                 self._send(200, b'{"ok":true}', "application/json")
+                threading.Thread(target=server.reveal, args=(req,), daemon=True).start()
 
         last = None
         for port in (self._preferred, 0):
@@ -890,6 +926,25 @@ color:#fff;text-decoration:none;font-size:18px;font-weight:600}}
            "code – confirm it on the phone AND on the computer.")}</small>
 </body></html>"""
 
+    def reveal(self, req, wait=30):
+        """Hand the pairing key to the phone - only over TLS pinned to the fingerprint the phone
+        sent, so only that phone gets it. Then the phone can show the code too."""
+        deadline = time.monotonic() + wait
+        while True:
+            c = Client(req.address, req.fingerprint, timeout=10)
+            try:
+                c.request("POST", "/reveal", {"token": self.token, "key": self.key})
+                return True
+            except (OSError, CompanionError, http.client.HTTPException) as e:
+                final = isinstance(e, CompanionError) and e.status in (400, 403, 404)
+                if final or time.monotonic() > deadline:
+                    if self.on_error:
+                        self.on_error(tr("could not reach the phone app: %s", e))
+                    return False
+            finally:
+                c.close()
+            time.sleep(1.0)
+
     def claim(self, req, cancel=None, wait=180):
         """After the user confirmed the code: fetch the secret from the phone over pinned TLS.
         The phone hands it out only after the code was ALSO confirmed on the phone (answer 409
@@ -898,7 +953,7 @@ color:#fff;text-decoration:none;font-size:18px;font-weight:600}}
         while True:
             c = Client(req.address, req.fingerprint, timeout=20)
             try:
-                res = c.request("POST", "/claim", {"token": req.token})
+                res = c.request("POST", "/claim", {"token": self.token, "key": self.key})
                 break
             except CompanionError as e:
                 wait_more = e.status == 409       # the phone: "wait" (not confirmed there yet)

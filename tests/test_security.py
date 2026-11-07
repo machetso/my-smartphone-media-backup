@@ -231,15 +231,47 @@ class SetupServerTest(unittest.TestCase):
         return r.status
 
     def test_negative_length_and_second_request(self):
-        good = {"token": self.token, "fingerprint": "a" * 64, "port": 47823}
+        good = {"token": self.token, "fingerprint": "a" * 64, "port": 47823, "nonce": "ab" * 16}
         self.assertEqual(self.post(good, length=-1), 400)
-        self.assertEqual(self.post(good), 200)
+        with mock.patch.object(type(self.s), "reveal", lambda s, r: None):
+            self.assertEqual(self.post(good), 200)
         evil = dict(good, fingerprint="b" * 64)
         self.assertEqual(self.post(evil), 409)          # the shown code is never replaced
         self.assertEqual(len(self.got), 1)
 
+    def test_old_phone_app_without_nonce_is_told_to_update(self):
+        self.assertEqual(self.post({"token": self.token, "fingerprint": "a" * 64, "port": 1}), 426)
+        self.assertTrue(self.got[0].outdated)
+        self.assertEqual(self.got[0].code, "")             # no code shown for it
+
     def test_bound_to_the_qr_address_only(self):
         self.assertEqual(self.s.httpd.server_address[0], "127.0.0.1")
+
+
+class HotspotPasswordTest(unittest.TestCase):
+    def test_password_never_in_a_command_line(self):
+        argvs, stdins = [], []
+
+        class R:
+            returncode, stdout, stderr = 0, b"", b""
+
+        def fake_run(args, input=None, **kw):
+            argvs.append(list(args))
+            stdins.append(input or b"")
+            return R()
+
+        with mock.patch.object(wireless.subprocess, "run", fake_run), \
+                mock.patch.object(wireless, "_run", lambda a, timeout=0: fake_run(a)), \
+                mock.patch.object(wireless.shutil, "which", lambda n: "/usr/bin/nmcli"), \
+                mock.patch.object(wireless, "wifi_interface", lambda: "wlan0"), \
+                mock.patch.object(wireless.sys, "platform", "linux"):
+            ok, _ = wireless.start_hotspot("PhoneBackup-AB12", "s3cretpassw0")
+        self.assertTrue(ok)
+        self.assertFalse(any("s3cretpassw0" in a for argv in argvs for a in argv))
+        self.assertTrue(any(b"psk s3cretpassw0" in i for i in stdins))
+        self.assertIn(["nmcli", "connection", "up", wireless.HOTSPOT_CON], argvs)
+        with self.assertRaises(ValueError):
+            wireless._hotspot_profile("wlan0", "x", "pw\nset ipv4.method auto", "")
 
 
 class WifiAutoConnectTest(unittest.TestCase):

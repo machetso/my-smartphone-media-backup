@@ -129,6 +129,7 @@ class BackupService : Service() {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
+        if (ev == "PAIR_CODE") return            // the app screen picks the code up itself
         if (ev.startsWith("PAIRED\n")) {
             AppState.pairedChanged++
             AppState.pairings++

@@ -344,6 +344,8 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
             shutil.rmtree(d.tmp, ignore_errors=True)
             if hasattr(source, "staging"):
                 shutil.rmtree(d.home / INTERNAL_DIR / "staging", ignore_errors=True)
+    for d in dests:                           # everything in the index file before others read it
+        d.index.commit()
     for d in dests:                           # GFS: full/differential also get the earlier files
         if d.plan == plans.GFS:
             status = plans.finish_gfs(d, status, cfg, cancel)

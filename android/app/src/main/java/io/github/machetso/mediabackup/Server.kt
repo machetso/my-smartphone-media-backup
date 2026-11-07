@@ -145,13 +145,26 @@ class Server(private val ctx: Context, private val onEvent: (String) -> Unit) {
             return keep
         }
         // ---- pairing: the one request that does not need a secret (needs the one-time token)
+        if (req.method == "POST" && req.path == "/reveal") {
+            val body = runCatching { jsonBody(req) }.getOrNull()
+            val ok = Pairing.reveal(body?.optString("token"), body?.optString("key"))
+            if (!ok) {
+                Response.json(out, 403, """{"error":"no pairing pending or wrong key"}""", false)
+                return false
+            }
+            onEvent("PAIR_CODE")
+            Response.json(out, 200, """{"ok":true}""", false)
+            return false
+        }
         if (req.method == "POST" && req.path == "/claim") {
-            val token = runCatching { jsonBody(req).getString("token") }.getOrNull()
-            if (Pairing.waitingForConfirmation(token)) {     // the computer asks again in a moment
+            val body = runCatching { jsonBody(req) }.getOrNull()
+            val token = body?.optString("token")
+            val key = body?.optString("key")
+            if (Pairing.waitingForConfirmation(token, key)) {   // the computer asks again in a moment
                 Response.json(out, 409, """{"error":"confirm on the phone","wait":true}""", false)
                 return false
             }
-            val pc = Pairing.claim(ctx, token)
+            val pc = Pairing.claim(ctx, token, key)
             if (pc == null) {
                 Response.json(out, 403, """{"error":"no pairing pending or wrong token"}""", false)
                 return false

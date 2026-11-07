@@ -129,6 +129,10 @@ object Identity {
     fun sha256Hex(b: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
+    /** Wi-Fi pairing code (commit-then-reveal, see Pairing) - same as pairing_code_v2 on the computer. */
+    fun pairingCodeV2(key: String, fingerprint: String, nonce: String): String =
+        pairingCode("v2:$key", "$fingerprint:$nonce")
+
     /** 6-digit code shown on phone AND computer while pairing - must be the same on both. */
     fun pairingCode(token: String, fingerprint: String): String {
         val d = MessageDigest.getInstance("SHA-256").digest("$token:$fingerprint".toByteArray())

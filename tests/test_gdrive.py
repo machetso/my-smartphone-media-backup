@@ -2,10 +2,14 @@
 
 import hashlib
 import json
+from datetime import datetime, timezone
 import re
+import shutil
 import tempfile
 import threading
+import time
 import unittest
+from unittest import mock
 import urllib.parse
 from pathlib import Path
 
@@ -24,6 +28,11 @@ class FakeDrive:
         self.copies = 0
         self.shortcuts = 0
         self.moves = 0
+        self.t = 1_800_000_000.0             # fake clock for createdTime / modifiedTime
+
+    def clock(self):
+        self.t += 1
+        return datetime.fromtimestamp(self.t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     def _id(self):
         self.n += 1
@@ -56,7 +65,13 @@ class FakeDrive:
                     continue
                 if "mimeType = 'application/vnd.google-apps.folder'" in q and f["mimeType"] != gdrive.FOLDER_MIME:
                     continue
+                m = re.search(r"appProperties has \{ key='([^']*)' and value='([^']*)' \}", q)
+                if m and f.get("appProperties", {}).get(m.group(1)) != m.group(2):
+                    continue
                 d = {"id": fid, "name": f["name"], "mimeType": f["mimeType"], "parents": f["parents"]}
+                for k in ("appProperties", "createdTime", "modifiedTime"):
+                    if k in f:
+                        d[k] = f[k]
                 if "target" in f:
                     d["shortcutDetails"] = {"targetId": f["target"]}
                 if "data" in f:
@@ -69,6 +84,10 @@ class FakeDrive:
             fid = self._id()
             self.files[fid] = {"name": meta["name"], "mimeType": meta["mimeType"],
                                "parents": meta.get("parents", ["root"])}
+            if "appProperties" in meta:
+                now = self.clock()
+                self.files[fid].update(appProperties=dict(meta["appProperties"]),
+                                       createdTime=now, modifiedTime=now)
             if meta["mimeType"] == gdrive.SHORTCUT_MIME:
                 self.files[fid]["target"] = meta["shortcutDetails"]["targetId"]
                 self.shortcuts += 1
@@ -109,6 +128,11 @@ class FakeDrive:
                 a, b = map(int, rng.split("=")[1].split("-"))
                 return 206, {}, data[a:b + 1]
             return 200, {}, data
+        if m and method == "PATCH" and "addParents" not in qs:   # metadata update (lock heartbeat)
+            f = self.files[m.group(1)]
+            f.setdefault("appProperties", {}).update(json.loads(body).get("appProperties", {}))
+            f["modifiedTime"] = self.clock()
+            return 200, {}, json.dumps({"id": m.group(1)}).encode()
         if m and method == "PATCH":
             f = self.files[m.group(1)]
             assert f["parents"] == [qs["removeParents"]], "moved from the wrong folder"
@@ -218,6 +242,59 @@ class GDriveExportTest(unittest.TestCase):
     def test_not_enough_space(self):
         with self.assertRaises(gdrive.DriveError):
             self.run_export(FakeDrive(quota_limit=100))
+
+
+
+class DriveLockTest(unittest.TestCase):
+    """One writer per Google Drive: a second computer/window is refused, not mixed in."""
+
+    def setUp(self):
+        self.fake = FakeDrive()
+        self.a = gdrive.Drive({}, transport=self.fake)
+        self.b = gdrive.Drive({}, transport=self.fake)
+        self.root = self.a.find_or_create_folder(gdrive.ROOT_NAME, None, app_key="root")
+
+    def markers(self):
+        return [f for f in self.fake.files.values() if "appProperties" in f
+                and f["appProperties"].get(gdrive.LOCK_PROP) == "1"]
+
+    def test_second_writer_is_refused_and_leaves_nothing(self):
+        self.a.hold_lock(self.root)
+        with self.assertRaises(gdrive.DriveBusy):
+            self.b.hold_lock(self.root)
+        self.assertEqual(len(self.markers()), 1)
+        self.a.release_lock()
+        self.assertEqual(self.markers(), [])
+        self.b.hold_lock(self.root)                     # free again
+        self.b.release_lock()
+
+    def test_reentrant_in_one_client(self):
+        self.a.hold_lock(self.root)
+        self.a.hold_lock(self.root)
+        self.a.release_lock()
+        self.assertEqual(len(self.markers()), 1)
+        self.a.release_lock()
+        self.assertEqual(self.markers(), [])
+
+    def test_left_over_marker_of_a_crash_is_ignored(self):
+        self.a.hold_lock(self.root)
+        self.a._writer._stop.set()                      # "crash": no more heartbeats, no release
+        self.a._writer = None
+        self.fake.t += gdrive.LOCK_STALE + 60
+        with mock.patch.object(time, "time", lambda: self.fake.t + 1):
+            self.b.hold_lock(self.root)
+        self.assertEqual(len(self.markers()), 1)
+        self.b.release_lock()
+
+    def test_parallel_exports_one_wins(self):
+        src = Path(tempfile.mkdtemp()) / "Pixel - Me"
+        (src / "Camera").mkdir(parents=True)
+        (src / "Camera" / "a.jpg").write_bytes(b"a" * 10)
+        self.addCleanup(shutil.rmtree, src.parent, ignore_errors=True)
+        self.a.hold_lock(self.root)                     # e.g. the other computer is uploading
+        with self.assertRaises(gdrive.DriveBusy):
+            gdrive.perform_drive_export(src, {}, drive=self.b, report_dir=src.parent / "r")
+        self.a.release_lock()
 
 
 if __name__ == "__main__":

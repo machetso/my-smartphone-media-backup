@@ -1995,6 +1995,18 @@ class MainWindow(QMainWindow):
                 return link
             # also when the app answered: an OUTDATED app is offered for update (asked first)
             state = src.companion_state()
+            if state != "missing" and apk is not None and src.companion_signer_matches(apk) is False:
+                # the installed app was NOT signed like ours: a fake (e.g. swapped during the
+                # download over Wi-Fi) - never use it, tell the user
+                if link is not None:
+                    link.close()
+                phone = f"{src.manufacturer} {src.device_name}".strip() or tr("the phone")
+                ui.error(tr("WARNING: the phone app “%s” on %s was NOT made by this program (it has a "
+                            "different signature) – it could be a fake that passes your photos on. It "
+                            "is not used. Uninstall “%s” on the phone, then connect the cable again: "
+                            "this program then offers to install the real one.",
+                            COMPANION_NAME, phone, COMPANION_NAME))
+                return None
             if link and state != "outdated":
                 return link
             if state != "ready":

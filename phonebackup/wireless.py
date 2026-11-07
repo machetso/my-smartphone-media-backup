@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass
 
 from .i18n import tr
-from .sources import _run
+from .sources import _NO_WINDOW, _run
 
 PAIRING = "_adb-tls-pairing._tcp"
 CONNECT = "_adb-tls-connect._tcp"
@@ -248,6 +248,34 @@ def _nmcli(args, timeout=60):
     return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace").strip()
 
 
+def _nmcli_stdin(args, commands, timeout=30):
+    """nmcli with commands on stdin (interactive editor) - so secrets never appear in the
+    process list (`ps` shows every program's arguments to all users)."""
+    r = subprocess.run(["nmcli"] + args, input="\n".join(commands + ["quit", ""]).encode(),
+                       capture_output=True, timeout=timeout, creationflags=_NO_WINDOW)
+    return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace").strip()
+
+
+def _hotspot_profile(dev, ssid, password, band):
+    """Create the hotspot profile; the password goes in through stdin, not as an argument."""
+    if any(c in v for v in (ssid, password, dev) for c in "\r\n"):
+        raise ValueError("line break in hotspot settings")
+    cmds = [f"set connection.interface-name {dev}", "set connection.autoconnect no",
+            f"set 802-11-wireless.ssid {ssid}", "set 802-11-wireless.mode ap",
+            "set ipv4.method shared",
+            "set 802-11-wireless-security.key-mgmt wpa-psk",
+            "set 802-11-wireless-security.proto rsn",
+            "set 802-11-wireless-security.pairwise ccmp",
+            "set 802-11-wireless-security.group ccmp",
+            f"set 802-11-wireless-security.psk {password}",
+            "save persistent"]
+    if band:
+        cmds.insert(4, f"set 802-11-wireless.band {band}")
+    code, out = _nmcli_stdin(["connection", "edit", "type", "wifi", "con-name", HOTSPOT_CON], cmds)
+    check, _ = _nmcli(["-g", "connection.id", "connection", "show", HOTSPOT_CON], timeout=15)
+    return check == 0, out
+
+
 def wifi_interface():
     code, out = _nmcli(["-t", "-f", "DEVICE,TYPE", "device"], timeout=15)
     if code != 0:
@@ -284,11 +312,14 @@ def start_hotspot(ssid, password):
     if not dev:
         return False, tr("No Wi-Fi adapter found.")
     msg = ""
-    for band in (["band", "a"], []):
+    for band in ("a", ""):
         try:
-            code, msg = _nmcli(["device", "wifi", "hotspot", "ifname", dev, "con-name", HOTSPOT_CON,
-                                "ssid", ssid, "password", password] + band, timeout=60)
-        except (OSError, subprocess.SubprocessError) as e:
+            _nmcli(["connection", "delete", HOTSPOT_CON], timeout=15)    # our own old profile
+            made, msg = _hotspot_profile(dev, ssid, password, band)
+            code = 1
+            if made:
+                code, msg = _nmcli(["connection", "up", HOTSPOT_CON], timeout=60)
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
             code, msg = 1, str(e)
         if code == 0:
             return True, (tr("5 GHz hotspot '%s' is on (%s).", ssid, dev) if band

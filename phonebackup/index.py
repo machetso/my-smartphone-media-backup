@@ -5,10 +5,12 @@ so each drive knows its own state (e.g. a newly added second HDD gets everything
 """
 
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 
 INTERNAL_DIR = ".phonebackup"
+COMMIT_EVERY = 1.0                 # seconds between commits while files are added
 
 
 class BackupIndex:
@@ -31,6 +33,7 @@ class BackupIndex:
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_sha ON files(sha256)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_rel ON files(rel_path)")
         self.db.commit()
+        self._last_commit = time.monotonic()
 
     def has(self, source_path, size):
         cur = self.db.execute("SELECT rel_path FROM files WHERE source_path=? AND size=?",
@@ -58,7 +61,17 @@ class BackupIndex:
             (source_path, size, mtime, sha, str(rel_path).replace("\\", "/"), category,
              taken.isoformat(sep=" ", timespec="seconds") if taken else None,
              date_source, datetime.now().isoformat(sep=" ", timespec="seconds")))
-        self.db.commit()
+        self._maybe_commit()
+
+    def _maybe_commit(self):
+        """At most one commit per COMMIT_EVERY seconds: a commit costs several fsyncs, which on a
+        USB hard disk took longer than copying a small photo. Safe: an entry lost in a crash only
+        makes the next backup find the identical file in place ("duplicate"), nothing is copied
+        twice."""
+        now = time.monotonic()
+        if now - self._last_commit >= COMMIT_EVERY:
+            self.db.commit()
+            self._last_commit = now
 
     def totals(self):
         """{category: (count, bytes)} of everything in this backup."""
@@ -70,7 +83,12 @@ class BackupIndex:
             out[cat] = (cnt, total or 0)
         return out
 
+    def commit(self):
+        self.db.commit()
+        self._last_commit = time.monotonic()
+
     def close(self):
+        self.db.commit()          # sqlite3 throws away what is not committed when closing
         self.db.close()
 
 

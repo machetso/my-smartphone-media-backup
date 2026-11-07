@@ -1249,6 +1249,17 @@
   "Connection to the computer lost.": "De'wI' rarmey Qaw'lu'.",
   "Connection to the computer lost – USB debugging switched off.": "De'wI' rarmey Qaw'lu' – USB debugging Qempa'lu'.",
   "Backup over Wi-Fi running.": "Wi-Fi polghach ta'lI'.",
-  "Backup running – USB debugging switches off when it is done.": "polghach ta'lI' – rIn, USB debugging Qempa'."
+  "Backup running – USB debugging switches off when it is done.": "polghach ta'lI' – rIn, USB debugging Qempa'.",
+  "the platform-tools for this computer are not in Google's list": "De'wI'vam platform-tools Google tetlhDaq tu'lu'be'",
+  "Asking Google for the current platform-tools …": "platform-tools chu' Google vIghel …",
+  "the download does not match Google's checksum - not used": "Google nIDmeH mI' rapbe' Suqlu'bogh – lo'be'lu'",
+  "could not reach the phone app: %s": "HablI' ghun 'oH vIghoS laHbe': %s",
+  "Another computer or window (%s) is writing to the Google Drive backups right now. Try again when it has finished.": "latlh De'wI' pagh latlh Qorwagh (%s) Google Drive ngaSwI'mey ghItlhtaH DaH. rInDI' yInIDqa'.",
+  "WARNING: the phone app “%s” on %s was NOT made by this program (it has a different signature) – it could be a fake that passes your photos on. It is not used. Uninstall “%s” on the phone, then connect the cable again: this program then offers to install the real one.": "yIqIm: HablI' ghun “%s” %sDaq ghunmoHbe' ghunvam (latlh pong ghaj) – DIr ghojmoHwI' nepwI' 'oH 'e' DuH. lo'be'lu'. HablI'Daq “%s” yIteq, vaj tlhegh yIrarqa': vaj teHbogh ghun jom 'e' nab ghunvam.",
+  "The phone app is too old for this program. Download the app again on the phone (step 1 on the page), install it, then scan the code again.": "ghunvamvaD qan law' HablI' ghun. HablI'Daq ghun yISuqqa' (ghItlhDaq mIw 1), yIjom, vaj ngoq yIleghqa'.",
+  "refused (not the phone app's file): %s": "lajQo'lu' (HablI' ghun De' teywI' 'oHbe'): %s",
+  "This computer program is too old for the app. Update “My Smartphone Media Backup” on the computer, then try again.": "ghunvaD qan law' De'wI' ghunvam. De'wI'Daq “My Smartphone Media Backup” yIchu'moH, vaj yInIDqa'.",
+  "Waiting for the code from %s …": "%s ngoq vIloStaH …",
+  "The computer did not send its code. Update the program on the computer, then try again.": "ngoqDaj ngeHbe' De'wI'. De'wI'Daq ghun yIchu'moH, vaj yInIDqa'."
  }
 }

@@ -39,6 +39,7 @@ CONTROL = {
     "companion_installed": f"pm list packages {COMPANION_PACKAGE}",
     "companion_grant": f"pm grant {COMPANION_PACKAGE} android.permission.WRITE_SECURE_SETTINGS",
     "companion_granted": f"dumpsys package {COMPANION_PACKAGE}",
+    "companion_path": f"pm path {COMPANION_PACKAGE}",
     "companion_open": f"am start -a android.intent.action.VIEW -d phonebackup://cable -p {COMPANION_PACKAGE}",
 }
 
@@ -81,3 +82,14 @@ def check_control(name):
         return CONTROL[name]
     except KeyError:
         raise ForbiddenPhoneCommand(tr("refused (unknown control action): %s", str(name)[:80])) from None
+
+
+_APK_PATH = re.compile(r"/data/app/[A-Za-z0-9._~=+-]+(?:/[A-Za-z0-9._~=+-]+)?/base\.apk")
+
+
+def check_companion_apk(path):
+    """The only file outside /sdcard the app may read: the INSTALLED phone app's own APK (to check
+    who signed it). Exactly '/data/app/<dir>[/<dir>]/base.apk', no '..'."""
+    if not _APK_PATH.fullmatch(path) or ".." in path.split("/"):
+        raise ForbiddenPhoneCommand(tr("refused (not the phone app's file): %s", path[:200]))
+    return path

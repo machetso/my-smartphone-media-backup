@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Security (open points of the 2026-11-06 review)
+- **Wi-Fi pairing can no longer be intercepted.** Before, somebody in the same Wi-Fi could read
+  the one-time token from the plain-HTTP link and fetch the pairing key from the phone before the
+  computer did. Now commit-then-reveal: the link only carries a hash of the key, the phone adds
+  its own random number, and the computer reveals the key only over the encrypted connection to
+  that phone. A listener never sees the key, and a man in the middle gets different codes on the
+  two screens. **Needs phone app 0.6.0** (older app/program versions say "please update").
+- **Fake phone app detected:** when the phone is on the cable, the program checks who signed the
+  installed phone app. If it is not the same as the app inside the program (e.g. a fake swapped in
+  during the download over Wi-Fi), it is not used and a warning explains what to do.
+- **ADB download checked:** the platform-tools file is now taken from Google's official SDK list
+  (current stable version) and its size and SHA-1 must match before anything is unpacked.
+- **Hotspot password no longer visible in the process list** (it was an nmcli argument; it now goes
+  in through stdin).
+- **Google Drive: one writer at a time.** Two computers/windows exporting or cleaning up the same
+  Google Drive at once could overwrite each other's catalog. A "writing now" marker on Google Drive
+  now makes the second one wait with a clear message (a left-over marker after a crash expires
+  after 15 minutes).
+
+### Faster / more reliable
+- The read-back check after copying now really reads from the drive (Linux: the just-written data
+  is dropped from RAM first).
+- Databases (backup index, export catalog, re-sorting) commit at most once per second instead of
+  after every file – much less waiting on USB hard disks. Nothing is lost on close.
+
 ## [0.9.6] - 2026-11-06
 
 ### Languages (user request 2026-11-06)

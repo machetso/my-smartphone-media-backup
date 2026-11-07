@@ -1289,6 +1289,17 @@
   "Connection to the computer lost.": "Conexión con el equipo perdida.",
   "Connection to the computer lost – USB debugging switched off.": "Conexión con el equipo perdida – depuración por USB desactivada.",
   "Backup over Wi-Fi running.": "Copia por Wi-Fi en curso.",
-  "Backup running – USB debugging switches off when it is done.": "Copia en curso – la depuración por USB se desactiva al terminar."
+  "Backup running – USB debugging switches off when it is done.": "Copia en curso – la depuración por USB se desactiva al terminar.",
+  "the platform-tools for this computer are not in Google's list": "las platform-tools para este ordenador no están en la lista de Google",
+  "Asking Google for the current platform-tools …": "Consultando a Google las platform-tools actuales …",
+  "the download does not match Google's checksum - not used": "la descarga no coincide con la suma de comprobación de Google – no se usa",
+  "could not reach the phone app: %s": "no se puede contactar con la app del teléfono: %s",
+  "Another computer or window (%s) is writing to the Google Drive backups right now. Try again when it has finished.": "Otro ordenador u otra ventana (%s) está escribiendo ahora en las copias de Google Drive. Inténtalo de nuevo cuando haya terminado.",
+  "WARNING: the phone app “%s” on %s was NOT made by this program (it has a different signature) – it could be a fake that passes your photos on. It is not used. Uninstall “%s” on the phone, then connect the cable again: this program then offers to install the real one.": "ADVERTENCIA: la app del teléfono «%s» en %s NO es de este programa (tiene otra firma) – podría ser una falsificación que pase tus fotos a terceros. No se usa. Desinstala «%s» en el teléfono y vuelve a conectar el cable: el programa ofrecerá entonces instalar la auténtica.",
+  "The phone app is too old for this program. Download the app again on the phone (step 1 on the page), install it, then scan the code again.": "La app del teléfono es demasiado antigua para este programa. Descarga de nuevo la app en el teléfono (paso 1 de la página), instálala y vuelve a escanear el código.",
+  "refused (not the phone app's file): %s": "rechazado (no es el archivo de la app del teléfono): %s",
+  "This computer program is too old for the app. Update “My Smartphone Media Backup” on the computer, then try again.": "Este programa del ordenador es demasiado antiguo para la app. Actualiza «My Smartphone Media Backup» en el ordenador y vuelve a intentarlo.",
+  "Waiting for the code from %s …": "Esperando el código de %s …",
+  "The computer did not send its code. Update the program on the computer, then try again.": "El ordenador no ha enviado su código. Actualiza el programa en el ordenador y vuelve a intentarlo."
  }
 }

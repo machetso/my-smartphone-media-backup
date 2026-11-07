@@ -1329,6 +1329,17 @@
   "Connection to the computer lost.": "החיבור למחשב אבד.",
   "Connection to the computer lost – USB debugging switched off.": "החיבור למחשב אבד – ניפוי הבאגים ב-USB כובה.",
   "Backup over Wi-Fi running.": "גיבוי ב-Wi-Fi פועל.",
-  "Backup running – USB debugging switches off when it is done.": "גיבוי פועל – ניפוי הבאגים ב-USB יכבה בסיומו."
+  "Backup running – USB debugging switches off when it is done.": "גיבוי פועל – ניפוי הבאגים ב-USB יכבה בסיומו.",
+  "the platform-tools for this computer are not in Google's list": "ה-platform-tools למחשב הזה לא נמצאים ברשימה של Google",
+  "Asking Google for the current platform-tools …": "שואל את Google מהם ה-platform-tools העדכניים …",
+  "the download does not match Google's checksum - not used": "ההורדה לא תואמת לסכום הביקורת של Google – לא בשימוש",
+  "could not reach the phone app: %s": "לא ניתן להתחבר לאפליקציה בטלפון: %s",
+  "Another computer or window (%s) is writing to the Google Drive backups right now. Try again when it has finished.": "מחשב או חלון אחר (%s) כותב כרגע לגיבויים ב-Google Drive. נסה שוב כשיסיים.",
+  "WARNING: the phone app “%s” on %s was NOT made by this program (it has a different signature) – it could be a fake that passes your photos on. It is not used. Uninstall “%s” on the phone, then connect the cable again: this program then offers to install the real one.": "אזהרה: האפליקציה „%s” ב-%s לא נוצרה על ידי התוכנה הזו (יש לה חתימה אחרת) – ייתכן שזו זיוף שמעביר את התמונות שלך הלאה. היא לא בשימוש. הסר את „%s” מהטלפון ואז חבר שוב את הכבל: התוכנה תציע אז להתקין את האפליקציה האמיתית.",
+  "The phone app is too old for this program. Download the app again on the phone (step 1 on the page), install it, then scan the code again.": "האפליקציה בטלפון ישנה מדי לתוכנה הזו. הורד שוב את האפליקציה בטלפון (שלב 1 בדף), התקן אותה ואז סרוק שוב את הקוד.",
+  "refused (not the phone app's file): %s": "נדחה (לא הקובץ של האפליקציה בטלפון): %s",
+  "This computer program is too old for the app. Update “My Smartphone Media Backup” on the computer, then try again.": "תוכנת המחשב ישנה מדי לאפליקציה. עדכן את „My Smartphone Media Backup” במחשב ונסה שוב.",
+  "Waiting for the code from %s …": "ממתין לקוד מ-%s …",
+  "The computer did not send its code. Update the program on the computer, then try again.": "המחשב לא שלח את הקוד שלו. עדכן את התוכנה במחשב ונסה שוב."
  }
 }

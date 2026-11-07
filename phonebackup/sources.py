@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -147,6 +148,27 @@ class AdbSource:
         from .companion import APP_VERSION_CODE
         m = re.search(r"versionCode=(\d+)", out)
         return "outdated" if m and int(m.group(1)) < APP_VERSION_CODE else "ready"
+
+    def companion_signer_matches(self, apk):
+        """Was the phone app installed on the phone signed like the bundled one? True / False /
+        None (could not be checked). A different signer = not our app (e.g. a fake APK handed
+        out by somebody in the Wi-Fi during the download)."""
+        from . import apksig
+        try:
+            _rc, out = self.control("companion_path")
+            paths = [ln[len("package:"):].strip() for ln in out.splitlines() if ln.startswith("package:")]
+            base = next((x for x in paths if x.endswith("/base.apk")), None)
+            if base is None:
+                return None
+            phoneguard.check_companion_apk(base)
+            with tempfile.TemporaryDirectory(prefix="pb-apk-") as tmp:
+                local = Path(tmp) / "installed.apk"
+                r = _run([self.adb, "-s", self.serial, "pull", base, str(local)], timeout=120)
+                if r.returncode != 0 or not local.is_file():
+                    return None
+                return apksig.same_signer(local, apk)
+        except (OSError, subprocess.SubprocessError, apksig.ApkSigError, phoneguard.ForbiddenPhoneCommand):
+            return None
 
     def install_companion(self, apk):
         """Install / update the bundled phone app (only this one file) and give it the right to

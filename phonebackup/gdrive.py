@@ -66,6 +66,9 @@ CHUNK = 8 * 1024 * 1024            # resumable upload chunk (multiple of 256 KiB
 DOWNLOAD_CHUNK = 16 * 1024 * 1024  # restore: bytes per download request
 UPLOAD_WORKERS = 3                 # files uploaded at the same time (many small photos: much faster)
 LOGIN_TIMEOUT = 300
+LOCK_PROP = "fsmb_lock"            # appProperties key of the "writing now" marker files
+LOCK_BEAT = 120                    # seconds between "still writing" updates of the marker
+LOCK_STALE = 15 * 60               # a marker not updated for this long is left over (crash, power cut)
 
 
 class DriveError(Exception):
@@ -77,6 +80,13 @@ class DriveError(Exception):
         super().__init__(message)
         if code:
             self.code = code
+
+
+class DriveBusy(DriveError):
+    """Another computer / window is writing to the same Google Drive backups right now."""
+
+    def __init__(self, message):
+        super().__init__(message, "busy")
 
 
 class NotSignedIn(DriveError):
@@ -252,6 +262,8 @@ class Drive:
 
     def __init__(self, cfg, transport=None):
         self.cfg = cfg
+        self._writer = None                        # DriveLock while this client writes
+        self._writer_depth = 0
         self._tok_lock = threading.Lock()          # parallel uploads share the sign-in
         self._folder_lock = threading.RLock()      # a folder must never be created twice
         self.transport = transport or self._urllib
@@ -329,6 +341,25 @@ class Drive:
         use = int(q.get("usage", 0))
         return {"email": a.get("user", {}).get("emailAddress", ""), "limit": lim, "usage": use,
                 "free": None if lim is None else max(lim - use, 0)}
+
+    # --- one writer at a time
+    def hold_lock(self, root_id):
+        """Only ONE computer/window may change this app's Google Drive folder at a time
+        (two exports would overwrite each other's catalog, a clean-up could delete files the
+        other one just linked). Re-entrant per Drive client. Raises DriveBusy."""
+        if self._writer is None:
+            lk = DriveLock(self, root_id)
+            lk.acquire()
+            self._writer = lk
+        self._writer_depth += 1
+
+    def release_lock(self):
+        if self._writer_depth == 0:
+            return
+        self._writer_depth -= 1
+        if self._writer_depth == 0 and self._writer is not None:
+            lk, self._writer = self._writer, None
+            lk.release()
 
     # --- folders / listing
     def find_or_create_folder(self, name, parent=None, app_key=None):
@@ -494,11 +525,91 @@ class Drive:
 
 
 # --------------------------------------------------------------------------------------- export
+class DriveLock:
+    """A "writing now" marker file in the app's root folder on Google Drive.
+
+    Drive has no atomic "create if absent", so: create our own marker, then list all markers -
+    the oldest live one wins (ties: smaller id); a loser removes its marker again. Markers are
+    refreshed every LOCK_BEAT seconds; one older than LOCK_STALE is left over and ignored."""
+
+    def __init__(self, drive, root_id, now=None):
+        self.drive, self.root = drive, root_id
+        self.now = now or (lambda: time.time())
+        self.id = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _markers(self):
+        r = self.drive.call("GET", f"{API}/files", {
+            "q": f"{_q(self.root)} in parents and trashed = false and "
+                 f"appProperties has {{ key='{LOCK_PROP}' and value='1' }}",
+            "fields": "files(id,name,createdTime,modifiedTime,appProperties)",
+            "spaces": "drive", "pageSize": 100})
+        return r.get("files", [])
+
+    @staticmethod
+    def _ts(v):
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+        except (AttributeError, ValueError):
+            return 0.0
+
+    def acquire(self):
+        host = socket.gethostname() or "?"
+        meta = {"name": f".writing-{host}-{os.getpid()}", "parents": [self.root],
+                "mimeType": "text/plain",
+                "appProperties": {LOCK_PROP: "1", "host": host[:60], "pid": str(os.getpid())}}
+        self.id = self.drive.call("POST", f"{API}/files", {"fields": "id"}, body=meta)["id"]
+        live = []
+        for m in self._markers():
+            if m["id"] != self.id and self.now() - self._ts(m.get("modifiedTime")) > LOCK_STALE:
+                self.drive.delete(m["id"])                       # left over by a crash
+                continue
+            live.append(m)
+        live.sort(key=lambda m: (self._ts(m.get("createdTime")), m["id"]))
+        if live and live[0]["id"] != self.id:
+            other = (live[0].get("appProperties") or {}).get("host", "?")
+            self.drive.delete(self.id)
+            self.id = None
+            raise DriveBusy(tr("Another computer or window (%s) is writing to the Google Drive backups "
+                               "right now. Try again when it has finished.", other))
+        self._thread = threading.Thread(target=self._beat, daemon=True)
+        self._thread.start()
+
+    def _beat(self):
+        while not self._stop.wait(LOCK_BEAT):
+            try:
+                self.drive.call("PATCH", f"{API}/files/{self.id}", {"fields": "id"},
+                                body={"appProperties": {"beat": str(int(self.now()))}})
+            except DriveError:
+                pass                  # next beat tries again; the job itself reports real errors
+
+    def release(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+        if self.id:
+            try:
+                self.drive.delete(self.id)
+            except DriveError:
+                pass                  # becomes stale after LOCK_STALE
+            self.id = None
+
+
 def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir=None):
     """Mirror a backup folder to Google Drive. Returns (status, report paths, verdict)."""
+    drive = drive or Drive(cfg)
+    root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
+    drive.hold_lock(root)
+    try:
+        return _perform_drive_export(source_parent, cfg, cancel, drive, report_dir)
+    finally:
+        drive.release_lock()
+
+
+def _perform_drive_export(source_parent, cfg, cancel, drive, report_dir):
     source_parent = Path(source_parent)
     name = source_parent.name
-    drive = drive or Drive(cfg)
     started = datetime.now()
     t0 = time.monotonic()
 

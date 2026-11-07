@@ -1329,6 +1329,17 @@
   "Connection to the computer lost.": "Conexiunea cu computerul s-a pierdut.",
   "Connection to the computer lost – USB debugging switched off.": "Conexiunea cu computerul s-a pierdut – depanarea USB a fost oprită.",
   "Backup over Wi-Fi running.": "Backup prin Wi-Fi în curs.",
-  "Backup running – USB debugging switches off when it is done.": "Backup în curs – depanarea USB se oprește la final."
+  "Backup running – USB debugging switches off when it is done.": "Backup în curs – depanarea USB se oprește la final.",
+  "the platform-tools for this computer are not in Google's list": "platform-tools pentru acest calculator nu sunt în lista Google",
+  "Asking Google for the current platform-tools …": "Se cer de la Google platform-tools actuale …",
+  "the download does not match Google's checksum - not used": "descărcarea nu corespunde sumei de control Google – nu este folosită",
+  "could not reach the phone app: %s": "aplicația de pe telefon nu poate fi contactată: %s",
+  "Another computer or window (%s) is writing to the Google Drive backups right now. Try again when it has finished.": "Un alt calculator sau o altă fereastră (%s) scrie chiar acum în copiile de pe Google Drive. Încearcă din nou după ce a terminat.",
+  "WARNING: the phone app “%s” on %s was NOT made by this program (it has a different signature) – it could be a fake that passes your photos on. It is not used. Uninstall “%s” on the phone, then connect the cable again: this program then offers to install the real one.": "AVERTISMENT: aplicația de telefon „%s” de pe %s NU provine de la acest program (are altă semnătură) – ar putea fi un fals care îți transmite fotografiile mai departe. Nu este folosită. Dezinstalează „%s” de pe telefon, apoi conectează din nou cablul: programul îți va oferi atunci să instaleze aplicația reală.",
+  "The phone app is too old for this program. Download the app again on the phone (step 1 on the page), install it, then scan the code again.": "Aplicația de pe telefon este prea veche pentru acest program. Descarcă din nou aplicația pe telefon (pasul 1 de pe pagină), instaleaz-o, apoi scanează din nou codul.",
+  "refused (not the phone app's file): %s": "refuzat (nu este fișierul aplicației de telefon): %s",
+  "This computer program is too old for the app. Update “My Smartphone Media Backup” on the computer, then try again.": "Acest program de calculator este prea vechi pentru aplicație. Actualizează „My Smartphone Media Backup” pe calculator, apoi încearcă din nou.",
+  "Waiting for the code from %s …": "Se așteaptă codul de la %s …",
+  "The computer did not send its code. Update the program on the computer, then try again.": "Calculatorul nu și-a trimis codul. Actualizează programul de pe calculator, apoi încearcă din nou."
  }
 }

@@ -360,6 +360,7 @@ class PhoneAppDialog(QDialog):
 
     pair_request = Signal(object)
     claimed = Signal(object, str)        # entry or None, error
+    pair_error = Signal(str)             # the key could not be handed to the phone
 
     def __init__(self, parent, cfg):
         super().__init__(parent)
@@ -376,7 +377,8 @@ class PhoneAppDialog(QDialog):
             "It may only <b>read photos and videos</b> – nothing else – and the connection is "
             "encrypted. Phone and computer must be in the same Wi-Fi (or the phone in the computer's "
             "Direct Wi-Fi).")))
-        self.server = companion.SetupServer(cfg, lambda r: self.pair_request.emit(r))
+        self.server = companion.SetupServer(cfg, lambda r: self.pair_request.emit(r),
+                                            on_error=lambda t: self.pair_error.emit(t))
         try:
             self.server.start()
             err = None
@@ -432,9 +434,15 @@ class PhoneAppDialog(QDialog):
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
         self.pair_request.connect(self._on_request)
+        self.pair_error.connect(self._on_pair_error)
         self.claimed.connect(self._on_claimed)
 
     def _on_request(self, req):
+        if req.outdated:
+            self.status.setText(_status_html(tr(
+                "The phone app is too old for this program. Download the app again on the phone "
+                "(step 1 on the page), install it, then scan the code again."), RED))
+            return
         self.req = req
         code = req.code[:3] + " " + req.code[3:]
         self.code_label.setText(
@@ -461,6 +469,11 @@ class PhoneAppDialog(QDialog):
                 self.claimed.emit(None, str(e))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_pair_error(self, text):
+        self.code_box.hide()
+        self.req = None
+        self.status.setText(_status_html(tr("Pairing failed: %s", text), RED))
 
     def _refuse(self):
         self.req = None

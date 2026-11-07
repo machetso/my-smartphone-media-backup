@@ -2,7 +2,8 @@
 
 The source is read only once; every destination has its own writer thread, so two
 HDDs are written in parallel. After writing, each copy is flushed to disk (fsync)
-and read back to compute its SHA-256.
+and read back to compute its SHA-256. On Linux the just-written pages are dropped from the
+page cache first, so the read-back really comes from the drive and not from RAM.
 """
 
 import hashlib
@@ -29,6 +30,16 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def drop_cache(fd):
+    """Forget the cached pages of a file that was fsync'ed (Linux): the next read comes from the
+    drive. Without it the verification would mostly read what is still in RAM. Elsewhere: no-op."""
+    if hasattr(os, "posix_fadvise"):
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        except OSError:
+            pass
+
+
 class WriteResult:
     def __init__(self, path):
         self.path = path
@@ -53,6 +64,7 @@ def _writer(q, res, fsync):
         f.flush()
         if fsync:
             os.fsync(f.fileno())
+            drop_cache(f.fileno())               # only clean (fsync'ed) pages can be dropped
         f.close()
         f = None
         res.sha256 = sha256_file(res.path)      # read back = verification of the written copy

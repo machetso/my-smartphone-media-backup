@@ -8,20 +8,33 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Pairing with a computer:
+ * Pairing with a computer (commit-then-reveal, app 0.6.0):
  * 1. The computer's setup page opens  phonebackup://pair?pc=<ip:port>&t=<token>&id=<pc id>&name=<pc name>
- * 2. The phone sends its certificate fingerprint to the computer (plain HTTP in the local network).
- * 3. Phone and computer show the same 6-digit code; the user confirms it on BOTH (security
- *    review 2026-11-06: before, only the computer asked – any app or web link could pair).
- * 4. The computer connects over TLS (pinned fingerprint) and claims a long-term secret with the
- *    one-time token (/claim on the server). Only after the confirmation on the phone; the token
- *    is then invalid.
+ *    where token = SHA-256(key); the key itself stays on the computer for now.
+ * 2. The phone sends its certificate fingerprint and a fresh random nonce to the computer
+ *    (plain HTTP in the local network).
+ * 3. The computer reveals the key over TLS pinned to that fingerprint (/reveal); the phone checks
+ *    SHA-256(key) == token. Both now show code(key, fingerprint, nonce); the user confirms it on
+ *    BOTH. A listener in the Wi-Fi never sees the key; a man in the middle must choose his values
+ *    before he knows the key / the nonce, so the two codes differ.
+ * 4. The computer claims a long-term secret with the key (/claim). Only after the confirmation on
+ *    the phone; the pairing is then over.
  * The computer must be in the local network (private / link-local address, not the phone itself).
  */
 object Pairing {
     data class Pending(val token: String, val pcAddress: String, val pcId: String, val pcName: String,
-                       val code: String, val created: Long) {
+                       val nonce: String, val created: Long) {
         @Volatile var confirmed = false          // the user tapped "Pair" on the phone
+        @Volatile var key: String? = null        // revealed by the computer over pinned TLS
+        @Volatile var code: String? = null       // shown once the key is known
+    }
+
+    private fun isHex(s: String, len: IntRange) = s.length in len && s.all { it in "0123456789abcdef" }
+
+    private fun newNonce(): String {
+        val b = ByteArray(16)
+        java.security.SecureRandom().nextBytes(b)
+        return b.joinToString("") { "%02x".format(it) }
     }
 
     @Volatile var pending: Pending? = null
@@ -32,10 +45,10 @@ object Pairing {
         val pc = uri.getQueryParameter("pc") ?: return null
         if (!isLocalComputer(pc)) return null
         val token = uri.getQueryParameter("t") ?: return null
-        if (token.length < 16 || token.length > 128) return null
+        if (!isHex(token, 64..64)) return null          // SHA-256 of the key (older computers: no)
         val id = (uri.getQueryParameter("id") ?: pc).take(80)
         val name = (uri.getQueryParameter("name") ?: "Computer").take(60)
-        return Pending(token, pc, id, name, Identity.pairingCode(token, Identity.fingerprint()), System.currentTimeMillis())
+        return Pending(token, pc, id, name, newNonce(), System.currentTimeMillis())
     }
 
     /** "a.b.c.d:port" of a computer in the local network: 10/8, 172.16/12, 192.168/16,
@@ -53,6 +66,7 @@ object Pairing {
     /** Step 3 on the phone: the user compared the code and tapped "Pair". */
     fun confirm(): Boolean {
         val p = pending ?: return false
+        if (p.code == null) return false
         p.confirmed = true
         return true
     }
@@ -63,6 +77,7 @@ object Pairing {
         val body = JSONObject()
             .put("token", p.token)
             .put("fingerprint", Identity.fingerprint())
+            .put("nonce", p.nonce)
             .put("port", serverPort)
             .put("phone_id", Identity.phoneId(ctx))
             .put("manufacturer", Build.MANUFACTURER)
@@ -85,11 +100,27 @@ object Pairing {
         }
     }
 
+    private fun same(a: String?, b: String?) =
+        a != null && b != null && java.security.MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
+
+    /** Step 3: the computer reveals the key (arrives over TLS, so only from whoever got our
+     *  fingerprint). Accepted once, only if it matches the token from the link. */
+    @Synchronized
+    fun reveal(token: String?, key: String?): Boolean {
+        val p = pending ?: return false
+        if (!same(token, p.token) || key == null || !isHex(key, 32..128)) return false
+        if (p.key != null) return same(key, p.key)
+        if (!same(Identity.sha256Hex(key.toByteArray()), p.token)) return false
+        p.key = key
+        p.code = Identity.pairingCodeV2(key, Identity.fingerprint(), p.nonce)
+        return true
+    }
+
     /** Step 4. Returns (computer name, secret) or null. Pending pairings expire after 10 minutes. */
     @Synchronized
-    fun claim(ctx: Context, token: String?): Pair<String, String>? {
+    fun claim(ctx: Context, token: String?, key: String?): Pair<String, String>? {
         val p = pending ?: return null
-        if (token == null || !java.security.MessageDigest.isEqual(token.toByteArray(), p.token.toByteArray())) return null
+        if (!same(token, p.token) || p.key == null || !same(key, p.key)) return null
         if (System.currentTimeMillis() - p.created > 10 * 60_000) { pending = null; return null }
         if (!p.confirmed) return null            // not yet confirmed on the phone
         pending = null
@@ -99,9 +130,8 @@ object Pairing {
     fun cancel() { pending = null }
 
     /** For the server: is a pairing waiting for the user's tap on the phone? */
-    fun waitingForConfirmation(token: String?): Boolean {
+    fun waitingForConfirmation(token: String?, key: String?): Boolean {
         val p = pending ?: return false
-        return token != null && !p.confirmed &&
-            java.security.MessageDigest.isEqual(token.toByteArray(), p.token.toByteArray())
+        return !p.confirmed && same(token, p.token) && p.key != null && same(key, p.key)
     }
 }

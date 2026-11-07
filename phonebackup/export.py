@@ -58,6 +58,7 @@ class Catalog:
             CREATE TABLE IF NOT EXISTS files(run_id INTEGER, rel TEXT, size INTEGER,
                 mtime INTEGER, sha256 TEXT, PRIMARY KEY(run_id, rel));""")
         self.db.commit()
+        self._last_commit = time.monotonic()
 
     def runs(self):
         return [Run(*r) for r in self.db.execute(
@@ -106,7 +107,10 @@ class Catalog:
 
     def add_file(self, run_id, rel, size, mtime, sha):
         self.db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?)", (run_id, rel, size, mtime, sha))
-        self.db.commit()
+        now = time.monotonic()                 # at most one commit (= several fsyncs) per second
+        if now - self._last_commit >= 1.0:
+            self.db.commit()
+            self._last_commit = now
 
     def finish_run(self, run_id, status):
         self.db.execute("UPDATE runs SET finished=?, status=? WHERE id=?",
@@ -114,6 +118,7 @@ class Catalog:
         self.db.commit()
 
     def close(self):
+        self.db.commit()          # sqlite3 throws away what is not committed when closing
         self.db.close()
 
 

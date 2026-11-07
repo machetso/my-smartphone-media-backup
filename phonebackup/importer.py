@@ -6,6 +6,7 @@ everything already in the backup), and the source folder is only read - never ch
 """
 
 import os
+import time
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -333,6 +334,7 @@ def resort_camera_files(parent, dry_run=False, cancel=None, camera_names_only=Tr
                       "WHERE category IN ('other-photo', 'other-video') GROUP BY rel_path").fetchall()
     moves = []
     try:
+        last_commit = time.monotonic()
         for rel, taken, size in rows:
             if cancel is not None and cancel.is_set():
                 break
@@ -354,8 +356,9 @@ def resort_camera_files(parent, dry_run=False, cancel=None, camera_names_only=Tr
             if dst.stat().st_size != size:
                 raise OSError(tr("size changed while moving %s", rel))
             db.execute("UPDATE files SET rel_path=?, category=? WHERE rel_path=?", (new_rel, cat, rel))
-            if len(moves) % 200 == 0:
-                db.commit()
+            if time.monotonic() - last_commit >= 1.0:   # a crash loses at most ~1 s of moves - and
+                db.commit()                              # those heal: the next backup finds the
+                last_commit = time.monotonic()           # identical file in place ("duplicate")
         db.commit()
     finally:
         db.close()
