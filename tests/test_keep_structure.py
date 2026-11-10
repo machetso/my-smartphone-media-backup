@@ -25,10 +25,10 @@ class PlacementTest(unittest.TestCase):
         p = keep_structure_placement(["DCIM/Camera", "Pictures/Screenshots", "Movies"])
         t = datetime(2026, 3, 5)
         sf = lambda rel: SimpleNamespace(rel=rel)  # noqa: E731
-        self.assertEqual(p(sf("DCIM/Camera/a.jpg"), t, "photo").as_posix(), "2026/03.March-photos")
+        self.assertEqual(p(sf("DCIM/Camera/a.jpg"), t, "photo").as_posix(), "2026/26.03")
         self.assertEqual(p(sf("Pictures/Screenshots/b.png"), t, "photo").as_posix(), "Pictures/Screenshots")
         self.assertEqual(p(sf("Movies/Trip/Day 1/c.mp4"), t, "video").as_posix(), "Movies/Trip/Day 1")
-        self.assertEqual(p(sf("Pictures/Other/d.jpg"), t, "photo").as_posix(), "2026/03.March-photos")
+        self.assertEqual(p(sf("Pictures/Other/d.jpg"), t, "photo").as_posix(), "2026/26.03")
 
 
 class BackupTest(unittest.TestCase):
@@ -54,7 +54,7 @@ class BackupTest(unittest.TestCase):
                               [str(self.dest)], CFG, interactive=False, keep_structure=keep)
 
     def files(self):
-        root = self.dest / "Pixel 10 Pro - Sam"
+        root = self.dest / "Sam" / "Pixel 10 Pro"
         return sorted(p.relative_to(root).as_posix() for p in root.rglob("*")
                       if p.is_file() and not p.relative_to(root).parts[0].startswith(".")
                       and p.suffix in (".jpg", ".png", ".mp4"))
@@ -62,7 +62,7 @@ class BackupTest(unittest.TestCase):
     def test_keep_structure(self):
         status, _paths, _res, verdict = self.run_backup(True)
         self.assertEqual(status, "COMPLETED", verdict)
-        self.assertEqual(self.files(), ["2025/07.July-photos/IMG_1.jpg", "Movies/Trip/clip.mp4",
+        self.assertEqual(self.files(), ["2025/25.07/IMG_1.jpg", "Movies/Trip/clip.mp4",
                                         "Pictures/Screenshots/Shot_1.png"])
 
     def test_default_sorts_everything(self):

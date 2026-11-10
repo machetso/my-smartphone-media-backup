@@ -45,8 +45,8 @@ from .sources import SourceFile, _dedupe, _run
 
 SERVICE_TYPE = "_phonebkp._tcp"
 APP_PACKAGE = "io.github.machetso.mediabackup"
-APP_VERSION_CODE = 9          # versionCode of the bundled assets/companion/MediaBackup.apk
-APP_VERSION_NAME = "0.6.0"    # its versionName (shown before installing)
+APP_VERSION_CODE = 12         # versionCode of the bundled assets/companion/MediaBackup.apk
+APP_VERSION_NAME = "0.8.0"    # its versionName (shown before installing)
 APP_NAME = "My Media Backup"
 DEFAULT_PORT = 47823
 SETUP_PORT = 47824
@@ -74,6 +74,13 @@ def install_question(state, phone, serial, installed_version, apk_size):
         why = tr("The version on the phone is older than the one included in this program. The "
                  "newer version is needed so that phone and computer understand each other and all "
                  "safety switch-offs work.")
+    elif state == "reinstall":
+        title = tr("Install the app on the phone again?")
+        head = tr("This program wants to install the app %s again on %s – version %s over the "
+                  "installed version %s.", app, who, f"<b>{APP_VERSION_NAME}</b>",
+                  escape(installed_version or tr("unknown")))
+        why = tr("You asked for it in the program settings (e.g. because the app does not work "
+                 "properly). Pairings and settings in the app stay.")
     elif state == "no-permission":
         title = tr("Give the app on the phone a right?")
         head = tr("The app %s is already on %s, but it may not switch USB "
@@ -88,7 +95,10 @@ def install_question(state, phone, serial, installed_version, apk_size):
         why = tr("So that you do not need the Developer options any more: the app switches USB "
                  "debugging on only for a backup, and it is switched off again afterwards. It also "
                  "lets you back up over Wi-Fi without USB debugging.")
-    text = f"{head}<br><br><b>{tr('Why:')}</b> {why}"
+    text = (f"{head}<br><br><b>{tr('Why:')}</b> {why}<br><br><b>{tr('Without the app:')}</b> "
+            + tr("the backup over this USB cable works anyway – choose “No – back up without the app”. "
+                 "You then switch USB debugging on and off yourself in the Developer options.")
+            + (" " + tr("The app can be installed later in Program settings.") if state != "reinstall" else ""))
     happens, does, cannot, remove = (tr(h) for h in INSTALL_HEADINGS)
     details = (
         happens + "\n"
@@ -110,7 +120,7 @@ def install_question(state, phone, serial, installed_version, apk_size):
              "contacts no server on the internet, has no ads and no tracking.") + "\n\n"
         + tr("%s on the phone: Settings → Apps → %s → Uninstall.", remove, APP_NAME) + "\n\n"
         + tr("Nothing is installed if you choose “%s” – the backup still works with USB debugging "
-             "switched on by hand.", tr("Not now")))
+             "switched on by hand.", tr("No – back up without the app")))
     return title, text, details
 
 

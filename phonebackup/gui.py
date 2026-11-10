@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QApplication, QBoxLayo
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox,
-                               QSplitter, QStackedWidget, QStyle, QTabWidget, QTextBrowser, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QSizePolicy, QSplitter, QStackedWidget, QStyle, QTabWidget, QTextBrowser, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 from . import APP_NAME, __version__, config, i18n, ui
@@ -32,19 +32,23 @@ from .export import Catalog, folder_size, has_catalog, perform_export, perform_r
 from . import gfs
 from . import gdrive, gdrive_gfs
 from .copier import Cancelled
-from .importer import (CAMERA, OTHER, check_selection, guess_kind, perform_old_phone_import,
-                       perform_selection_import, scan_folder)
+from . import setfolders
+from .gui_layout import ask_layout
+from .importer import (CAMERA, OTHER, perform_old_phone_import,  # noqa: F401 - used by gui_backups
+                       perform_selection_import)
 from .layout import same_volume
 from .index import backup_totals, describe_totals
 from .locations import (describe_unmounted, detect_drives, detect_unmounted, drive_label_of,
-                        find_backups, find_export_sets, free_space, is_backup_folder,
+                        find_export_sets, free_space, is_backup_folder,
                         mount_device, mount_for_paths_status)
-from .sources import AdbSource, adb_devices, connect_source, find_adb
+from .sources import AdbSource, adb_devices, connect_source, find_adb, find_mtp
 from . import adbsetup, lastbackup, phoneid, wireless
 from .companion import (APP_NAME as COMPANION_NAME, APP_VERSION_NAME as COMPANION_VERSION, AppGuard,
                         CompanionSource, apk_path, ble_scan, find_phone, install_question,
                         link_over_cable, pair_over_cable, phones as paired_phones, _port_open)
 from .gui_setup import ConnectionOverview, UsbDebugGuide
+from .gui_backups import BackupsTabMixin, FolderListEditor, KnownPhonesBox, PhoneAppMixin
+from . import backuplist, connspeed
 
 PHONE_FOLDER_ROOTS = ["DCIM", "Pictures", "Movies", "Download",
                       "Android/media/com.whatsapp/WhatsApp/Media"]
@@ -111,8 +115,38 @@ class StatusBanner(QFrame):
         self.detail.setWordWrap(True)
         self.detail.setTextFormat(Qt.RichText)
         self.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.head)
+        self.hint = QLabel()             # "a faster connection is possible" (background check)
+        self.hint.setWordWrap(True)
+        self.hint.setTextFormat(Qt.RichText)
+        self.hint.hide()
+        top = QHBoxLayout()              # headline + an action button inside the coloured box
+        top.addWidget(self.head, 1)
+        self.action_box = QHBoxLayout()
+        top.addLayout(self.action_box)
+        lay.addLayout(top)
         lay.addWidget(self.detail)
+        lay.addWidget(self.hint)
+
+    # whole banner coloured by how well the phone is connected (user request 2026-11-10):
+    # red = none and none possible, yellow = possible but not yet, dark green = slow, light green = fast
+    LEVELS = {"none": ("#d32f2f", "#ffffff", "✕"), "possible": ("#f6d44a", "#2b2200", "▲"),
+              "slow": ("#1b5e20", "#ffffff", "●"), "fast": ("#a8e6a1", "#0d3b17", "●")}
+
+    def show_level(self, level, headline, detail):
+        bg, fg, sym = self.LEVELS[level]
+        self.level = level
+        self.setStyleSheet(f"#statusBanner{{border-radius:6px;background:{bg}}}"
+                           f"#statusBanner QLabel{{color:{fg};background:transparent}}")
+        self.head.setText(f"<span style='font-size:18px;font-weight:700'>{sym}&nbsp; {html.escape(headline)}</span>")
+        self.detail.setText(html.escape(detail).replace("\n", "<br>"))
+        self.detail.setVisible(bool(detail))
+
+    def add_action(self, button):
+        self.action_box.addWidget(button, 0, Qt.AlignTop)
+
+    def set_hint(self, text):
+        self.hint.setText(f"<b>{html.escape(text)}</b>" if text else "")
+        self.hint.setVisible(bool(text))
 
     def show_status(self, headline, detail, color):
         r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
@@ -165,6 +199,7 @@ class Bridge(QObject):
     companion_found = Signal(object)
     companion_lost = Signal()
     ble_seen = Signal(object)
+    conn_probe = Signal(object)       # background check: which connections are possible (connspeed)
 
 
 class GuiHandler:
@@ -193,8 +228,8 @@ class GuiHandler:
     def ask_yes_no(self, prompt, default=True):
         return self._ask("yesno", prompt, default)
 
-    def ask_install(self, title, text, details):
-        return self._ask("install", title, text, details)
+    def ask_install(self, title, text, details, never_key=None):
+        return self._ask("install", title, text, details, never_key)
 
     def choose(self, prompt, options, default=1):
         return self._ask("choose", prompt, options, default)
@@ -642,7 +677,8 @@ class FolderDialog(QDialog):
 class ImportSelectionDialog(QDialog):
     """Tick the folders of an old phone / old backup to import and choose how each is sorted."""
 
-    KINDS = [(CAMERA, N_("Camera → month folders")), (OTHER, N_("Other → other/… (original folder)"))]
+    # user request 2026-11-09: a folder is either sorted like a phone backup or kept 1:1
+    KINDS = [(CAMERA, N_("Sort into year/month folders")), (OTHER, N_("Keep folder as it is"))]
 
     def __init__(self, parent, scans, choices):
         """scans: {root: [FolderInfo]}, choices: {root: {rel: kind}} (the current selection)."""
@@ -654,8 +690,10 @@ class ImportSelectionDialog(QDialog):
         lab = QLabel(tr(
             "Every folder that contains files is listed (app data, caches, thumbnails, trash and hidden "
             "folders are left out). Each ticked folder is imported with its own files; its sub-folders "
-            "are separate lines. <b>Camera</b> folders go into the year/month folders, <b>Other</b> folders "
-            "keep their original folder name under <i>year/other/pictures | movies | other-files</i>."))
+            "are separate lines. <b>Sort into year/month folders</b>: the photos and videos are sorted by "
+            "date like a phone backup (e.g. <i>2019/19.07</i>). <b>Keep folder as it is</b>: the folder "
+            "is copied 1:1 with its name and path (e.g. <i>Urlaub Italien 2019/Tag 1</i>) – tick its "
+            "sub-folders too to keep the whole folder tree."))
         lab.setWordWrap(True)
         lay.addWidget(lab)
         self.tree = QTreeWidget()
@@ -830,7 +868,7 @@ def manual_text(code="en"):
     return ""
 
 
-class MainWindow(QMainWindow):
+class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.cfg = config.load()
@@ -843,6 +881,7 @@ class MainWindow(QMainWindow):
         self.bridge.companion_found.connect(self._on_companion_found)
         self.bridge.companion_lost.connect(self._on_companion_lost)
         self.bridge.ble_seen.connect(self._on_ble_seen)
+        self.bridge.conn_probe.connect(self._on_conn_probe)
         ui.set_handler(GuiHandler(self))
 
         self.executor = ThreadPoolExecutor(max_workers=1, initializer=_com_init)
@@ -867,18 +906,19 @@ class MainWindow(QMainWindow):
         # start screen → backup settings (subpage) / more (the other tabs)  - user request 2026-11-04
         self.tabs = QTabWidget()
         # contents scroll when the window is small, the start buttons always stay visible
-        self.tabs.addTab(self._scroll_page(self._build_import_tab(), self.start_import_btn),
-                         tr("Import old backup"))
+        # Manage backups = Backups, Backup backups, Restore; the program settings are a page of
+        # their own (Menu and the gear on the start screen) - user request 2026-11-10
+        self.tabs.addTab(self._scroll_page(self._build_backups_tab(), self.backup_actions), tr("Backups"))
         self.tabs.addTab(self._scroll_page(self._build_export_tab(), self.start_export_btn),
-                         tr("Second storage (export)"))
+                         tr("Backup backups"))
         self.tabs.addTab(self._scroll_page(self._build_restore_tab(), self.start_restore_btn), tr("Restore"))
-        self.tabs.addTab(self._scroll_page(self._build_settings_tab()), tr("Settings"))
         self.tabs.currentChanged.connect(self._tab_changed)
         self.pages = QStackedWidget()
         self.home_page = self._build_home()
         self.backup_page = self._build_backup_page()
         self.more_page = self._subpage(tr("Manage backups"), self.tabs)
-        for page in (self.home_page, self.backup_page, self.more_page):
+        self.settings_page = self._subpage(tr("Program settings"), self._build_settings_tab(), scroll=True)
+        for page in (self.home_page, self.backup_page, self.more_page, self.settings_page):
             self.pages.addWidget(page)
 
         # pages and log share the height (the log gives way first); the progress panel below is
@@ -916,10 +956,19 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1500, self._offer_adb_download)     # ADB missing → ask once
         if not os.environ.get("PHONEBACKUP_NO_UPDATE_CHECK"):
             QTimer.singleShot(4000, self._check_for_update)       # newer version on GitHub?
+        self._hotspot_info = None        # Direct Wi-Fi progress (the poller fills it)
+        self._hotspot_next = 0.0
         threading.Thread(target=self._adb_poller, daemon=True).start()
+        self._conn_rows = []
+        self._probing = False
+        self.conn_timer = QTimer(self)                # background: is a faster connection possible?
+        self.conn_timer.timeout.connect(self._start_conn_probe)
+        self.conn_timer.start(60_000)
+        QTimer.singleShot(20_000, self._start_conn_probe)
         lastbackup.discover(self.cfg)          # backups on the drives made before the phone list
         self._update_preview()
         self._update_home()
+        self._refresh_backups()
 
     # ------------------------------------------------------------------ tabs
     @staticmethod
@@ -937,8 +986,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(area, 1)
         row = QHBoxLayout()
         row.setContentsMargins(9, 0, 9, 6)
-        row.addStretch()
-        row.addWidget(action)
+        if not isinstance(action, QPushButton):     # a group of buttons: from the left
+            row.addWidget(action, 1)
+        else:
+            row.addStretch()
+            row.addWidget(action)
         lay.addLayout(row)
         return w
 
@@ -969,13 +1021,42 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(24, 18, 24, 12)
         name = QLabel(APP_NAME)
         name.setStyleSheet("font-size:22px;font-weight:700")
+        # Menu and the gear (program settings) top left (user request 2026-11-10)
+        settings = QToolButton()
+        settings.setIcon(gear_icon(self.palette().buttonText().color()))
+        settings.setIconSize(QSize(22, 22))
+        settings.setFixedSize(36, 34)
+        settings.setToolTip(tr("Program settings"))
+        settings.setAccessibleName(tr("Program settings"))
+        settings.clicked.connect(self._open_program_settings)
         head = QHBoxLayout()
+        head.addWidget(self._build_program_menu())
+        head.addWidget(settings)
+        head.addSpacing(12)
         head.addWidget(name)
         head.addStretch()
-        head.addWidget(self._build_program_menu())
         lay.addLayout(head)
         self.home_status = StatusBanner()
-        lay.addWidget(self.home_status)
+        # "Connect phone…" right next to "No phone connected" (user request 2026-11-10)
+        self.connect_phone_btn = QPushButton(tr("Connect phone…"))
+        self.connect_phone_btn.setMinimumHeight(40)
+        self.connect_phone_btn.setStyleSheet("QPushButton{font-weight:600;padding:6px 16px}")
+        self.connect_phone_btn.setToolTip(tr("Without a cable: a QR code to scan with the phone (it also "
+                                             "installs the phone app)."))
+        self.connect_phone_btn.clicked.connect(self._connect_phone_dialog)
+        self.connection_btn = QPushButton(tr("Possible connections"))
+        self.connection_btn.setMinimumHeight(40)
+        self.connection_btn.setToolTip(tr("All ways to connect the phone with their speed – choose one "
+                                          "yourself. The program checks in the background whether a "
+                                          "faster one is possible."))
+        self.connection_btn.clicked.connect(self._choose_connection)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.home_status, 1)
+        btns = QVBoxLayout()
+        btns.addWidget(self.connect_phone_btn)
+        btns.addWidget(self.connection_btn)
+        status_row.addLayout(btns)
+        lay.addLayout(status_row)
         lay.addSpacing(8)
 
         self.phone_rows = QVBoxLayout()
@@ -989,19 +1070,9 @@ class MainWindow(QMainWindow):
         area.setWidgetResizable(True)
         area.setFrameShape(QScrollArea.NoFrame)
         area.setWidget(area_w)
+        # no ticks and no "Remove" here: that is in Manage backups → Backups (user request 2026-11-10)
         pl = QVBoxLayout()
         pl.addWidget(area)
-        prow = QHBoxLayout()
-        sel_all = QPushButton(tr("Select all"))
-        sel_all.clicked.connect(lambda: [w.pick.setChecked(True) for w in self._phone_widgets.values()])
-        rm = QPushButton(tr("Remove ticked phones from list (backups are kept)"))
-        rm.setToolTip(tr("Removes the ticked phones from this list. Their backups on the drives are NOT "
-                         "deleted; a new backup of the phone adds it again."))
-        rm.clicked.connect(self._remove_phones)
-        prow.addWidget(sel_all)
-        prow.addWidget(rm)
-        prow.addStretch()
-        pl.addLayout(prow)
         lay.addWidget(_group(tr("Your phones"), pl), 1)
         self._phone_widgets = {}
         lay.addSpacing(8)
@@ -1011,20 +1082,12 @@ class MainWindow(QMainWindow):
         new.setToolTip(tr("Another phone, or other folders / drives: choose the connection, folders and "
                           "drives, then start."))
         new.clicked.connect(lambda: self._open_backup_page(True))
-        settings = QToolButton()
-        settings.setIcon(gear_icon(self.palette().buttonText().color()))
-        settings.setIconSize(QSize(26, 26))
-        settings.setFixedSize(44, 44)
-        settings.setToolTip(tr("Backup settings – phone connection, folders and drives"))
-        settings.setAccessibleName(tr("Backup settings"))
-        settings.clicked.connect(lambda: self._open_backup_page(False))
         more = QPushButton(tr("Manage backups…"))
         more.setMinimumHeight(40)
-        more.setToolTip(tr("Import old backups, copy backups to a second storage (export), restore, "
-                           "program settings."))
-        more.clicked.connect(lambda: self.pages.setCurrentWidget(self.more_page))
+        more.setToolTip(tr("Your backups (folders, drives, import of old drives and old phones), copies "
+                           "of the backups on another drive (Backup backups), restore."))
+        more.clicked.connect(self._open_manage_backups)
         row.addWidget(new)
-        row.addWidget(settings)
         row.addStretch()
         row.addWidget(more)
         lay.addLayout(row)
@@ -1054,6 +1117,7 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _c=False, code=code: self._menu_language(code))
         self._lang_actions = group
         menu.addAction(tr("Manual"), self._show_manual)
+        menu.addAction(tr("Manage backups…"), self._open_manage_backups)
         menu.addAction(tr("Program settings…"), self._open_program_settings)
         menu.addSeparator()
         menu.addAction(tr("About"), self._show_about)
@@ -1070,7 +1134,12 @@ class MainWindow(QMainWindow):
             act.setChecked(act.data() == stored)
 
     def _open_program_settings(self):
-        self.tabs.setCurrentIndex(self.tabs.count() - 1)      # Settings is the last tab
+        self.known_phones.fill()
+        self._update_versions()
+        self.pages.setCurrentWidget(self.settings_page)
+
+    def _open_manage_backups(self):
+        self._refresh_backups()
         self.pages.setCurrentWidget(self.more_page)
 
     def _show_about(self):
@@ -1102,9 +1171,8 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(self.home_page)
         self._update_home()
 
-    def _open_backup_page(self, new_backup):
-        self.backup_page.title_label.setText(tr("New backup") if new_backup else tr("Backup settings"))
-        self.start_backup_btn.setVisible(new_backup)
+    def _open_backup_page(self, new_backup=True):
+        self.backup_page.title_label.setText(tr("New backup"))
         self.dest_list.reset_added()
         self._apply_dest_filter()
         self._update_conn_hints()
@@ -1287,336 +1355,6 @@ class MainWindow(QMainWindow):
         lay.addStretch()
         return self._subpage(tr("New backup"), w, scroll=True, action=self.start_backup_btn)
 
-    def _build_import_tab(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        self.import_scans, self.import_choices = {}, {}
-
-        mode_row = QHBoxLayout()
-        self.imp_existing = QRadioButton(tr("Add to an existing backup"))
-        self.imp_new = QRadioButton(tr("New backup of an old phone"))
-        self.imp_existing.setChecked(True)
-        grp = QButtonGroup(w)
-        grp.addButton(self.imp_existing)
-        grp.addButton(self.imp_new)
-        self.imp_new.toggled.connect(self._import_mode_changed)
-        mode_row.addWidget(self.imp_existing)
-        mode_row.addWidget(self.imp_new)
-        mode_row.addStretch()
-        lay.addLayout(mode_row)
-        self.import_info = QLabel()
-        self.import_info.setWordWrap(True)
-        self.import_info.setStyleSheet(f"color:{GRAY}")
-        lay.addWidget(self.import_info)
-
-        src = QVBoxLayout()
-        self.import_roots = QTreeWidget()
-        self.import_roots.setHeaderLabels([tr("Folder"), tr("Selected")])
-        self.import_roots.setRootIsDecorated(False)
-        self.import_roots.setMaximumHeight(120)
-        self.import_roots.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.import_roots.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.import_roots.itemDoubleClicked.connect(lambda *_: self._choose_import_folders())
-        src.addWidget(self.import_roots)
-        btns = QHBoxLayout()
-        for text, fn in ((tr("Add folder…"), self._add_import_root), (tr("Remove"), self._remove_import_root),
-                         (tr("Choose folders to import…"), self._choose_import_folders)):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            btns.addWidget(b)
-        btns.addStretch()
-        src.addLayout(btns)
-        self.import_other_check = WrapCheck(tr(
-            "Also import other files (documents, audio, …) – they keep their original folder "
-            "under year/other/other-files"))
-        src.addWidget(self.import_other_check)
-        lay.addWidget(_group(tr("Folders to import (one or more, e.g. the old phone and its SD card)"), src))
-
-        # --- into an existing backup
-        self.import_existing_box = QWidget()
-        v = QVBoxLayout(self.import_existing_box)
-        v.setContentsMargins(0, 0, 0, 0)
-        top = QHBoxLayout()
-        self.import_target = QComboBox()
-        self.import_target.currentIndexChanged.connect(self._fill_import_copies)
-        refresh = QPushButton(tr("Refresh"))
-        refresh.setToolTip(tr("Search the saved backup drives again (attached drives are mounted)"))
-        refresh.clicked.connect(lambda: self._fill_import_targets(mount=True))
-        top.addWidget(self.import_target, 1)
-        top.addWidget(refresh)
-        v.addLayout(top)
-        hint = QLabel(tr("Copies of this backup on your drives – all ticked copies are updated at the same time:"))
-        hint.setStyleSheet(f"color:{GRAY}")
-        v.addWidget(hint)
-        self.import_copies = QListWidget()
-        v.addWidget(self.import_copies)
-        self.import_size = QLabel()
-        v.addWidget(self.import_size)
-        lay.addWidget(_group(tr("Import into backup"), self.import_existing_box), 1)
-        self.import_existing_group = self.import_existing_box.parentWidget()
-
-        # --- as a new backup of an old phone
-        self.import_new_box = QWidget()
-        v = QVBoxLayout(self.import_new_box)
-        v.setContentsMargins(0, 0, 0, 0)
-        form = QFormLayout()
-        self.import_phone_edit = QLineEdit()
-        self.import_phone_edit.setPlaceholderText(tr("e.g. Galaxy S7"))
-        self.import_owner_edit = QLineEdit(self.cfg.get("owner", ""))
-        self.import_owner_edit.setPlaceholderText(tr("e.g. Sam"))
-        form.addRow(tr("Old phone name:"), self.import_phone_edit)
-        form.addRow(tr("Owner:"), self.import_owner_edit)
-        v.addLayout(form)
-        self.import_dest_list = LocationList(
-            self.cfg, "destinations", "import_selected_destinations", True, "PhoneBackups",
-            tr("Tick the drive(s) to write the old phone's backup to – all ticked drives at the same time."),
-            plans_column=True)
-        self.import_dest_list.changed.connect(self._update_import_preview)
-        v.addWidget(self.import_dest_list, 1)
-        self.import_preview = QLabel()
-        self.import_preview.setWordWrap(True)
-        self.import_preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        v.addWidget(self.import_preview)
-        self.import_phone_edit.textChanged.connect(self._update_import_preview)
-        self.import_owner_edit.textChanged.connect(self._update_import_preview)
-        lay.addWidget(_group(tr("New backup"), self.import_new_box), 1)
-        self.import_new_group = self.import_new_box.parentWidget()
-
-        self.start_import_btn = _big_button(tr("Start import"))
-        self.start_import_btn.clicked.connect(self._start_import)
-        self._import_mode_changed()
-        self._fill_import_targets()
-        return w
-
-    def _import_new_mode(self):
-        return self.imp_new.isChecked()
-
-    def _import_mode_changed(self, *_):
-        new = self._import_new_mode()
-        self.import_existing_group.setVisible(not new)
-        self.import_new_group.setVisible(new)
-        self.import_other_check.setChecked(new)
-        if new:
-            self.import_info.setText(tr(
-                "Makes a backup of its own for an old phone (folder “Phone - Owner” on the drive). Add "
-                "the copied folder(s) of the old phone, then choose which folders count: camera folders "
-                "are sorted into year/month folders like a real phone backup, all other ticked folders "
-                "(pictures, movies, other files) keep their original folder under year/other/. Every "
-                "file is checked with SHA-256, identical files are stored only once, and the old folders "
-                "are only read – never changed."))
-        else:
-            self.import_info.setText(tr(
-                "Adds the photos and videos of an old backup (or any folders) to one of your backups. "
-                "Everything is sorted into the same year/month folders, every file is checked with "
-                "SHA-256, identical files are stored only once (also against what is already in the "
-                "backup), and the old folders are only read – never changed. Files that are not photos "
-                "or videos are skipped and listed in the report (unless “Also import other files” is ticked)."))
-        # the suggestions differ between the two modes
-        for root, infos in self.import_scans.items():
-            for info in infos:
-                guess_kind(info.rel, info, into_existing=not new)
-            self.import_choices[root] = {i.rel: i.kind for i in infos if i.suggested}
-        self._fill_import_roots()
-        self._update_import_preview()
-
-    def _fill_import_roots(self):
-        self.import_roots.clear()
-        if not self.import_scans:
-            it = QTreeWidgetItem([tr("No folder added yet – click “Add folder…”"), ""])
-            it.setFlags(Qt.NoItemFlags)
-            self.import_roots.addTopLevelItem(it)
-        for root, infos in self.import_scans.items():
-            chosen = self.import_choices.get(root, {})
-            ticked = [i for i in infos if i.rel in chosen]
-            cams = sum(1 for i in ticked if chosen[i.rel] == CAMERA)
-            files = sum(i.files for i in ticked)
-            text = (trp("%d of %d folder (%d camera, %d other)", "%d of %d folders (%d camera, %d other)",
-                        len(infos), len(ticked), len(infos), cams, len(ticked) - cams) + ", "
-                    + trp("%d file", "%d files", files, files) + ", "
-                    + ui.human_size(sum(i.size for i in ticked)))
-            it = QTreeWidgetItem([root, text])
-            it.setData(0, Qt.UserRole, root)
-            self.import_roots.addTopLevelItem(it)
-
-    def _scan_import_root(self, root):
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            ui.info(tr("Reading the folders of %s ...", root))
-            QApplication.processEvents()
-            infos = scan_folder(root, into_existing=not self._import_new_mode())
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.import_scans[root] = infos
-        self.import_choices[root] = {i.rel: i.kind for i in infos if i.suggested}
-        ui.info("  " + trp("%d folder with files, %d suggested.", "%d folders with files, %d suggested.",
-                           len(infos), len(infos), len(self.import_choices[root])))
-
-    def _add_import_root(self):
-        drives = detect_drives()
-        start = next(iter(self.import_scans), None) or (drives[0][0] if drives else str(Path.home()))
-        p = QFileDialog.getExistingDirectory(self, tr("Choose a folder to import (e.g. the copy of an old phone)"),
-                                             start)
-        if not p:
-            return
-        p = str(Path(p).resolve())
-        for other in self.import_scans:
-            o = Path(other)
-            if Path(p) == o or o in Path(p).parents or Path(p) in o.parents:
-                QMessageBox.warning(self, tr("Folder already added"),
-                                    tr("%s\noverlaps with the folder already in the list:\n%s\n\n"
-                                       "Choose the sub-folders with “Choose folders to import…” instead.",
-                                       p, other))
-                return
-        self._scan_import_root(p)
-        self._fill_import_roots()
-        self._choose_import_folders()
-
-    def _remove_import_root(self):
-        it = self.import_roots.currentItem()
-        root = it.data(0, Qt.UserRole) if it else None
-        if root:
-            self.import_scans.pop(root, None)
-            self.import_choices.pop(root, None)
-            self._fill_import_roots()
-
-    def _choose_import_folders(self):
-        if not self.import_scans:
-            self._add_import_root()
-            return
-        dlg = ImportSelectionDialog(self, self.import_scans, self.import_choices)
-        if dlg.exec() == QDialog.Accepted:
-            self.import_choices = dlg.choices()
-            self._fill_import_roots()
-
-    def _import_selections(self):
-        return [(root, rel, kind) for root, chosen in self.import_choices.items()
-                if root in self.import_scans for rel, kind in chosen.items()]
-
-    def _update_import_preview(self):
-        if not hasattr(self, "import_preview"):
-            return
-        phone = self.import_phone_edit.text().strip() or tr("<old phone>")
-        owner = self.import_owner_edit.text().strip() or tr("<owner>")
-        dests = self.import_dest_list.selected_paths()
-        base = Path(dests[0]) if dests else Path(tr("<drive>"))
-        parent = base / backup_parent_name(phone, owner)
-        self.import_preview.setText(
-            tr("Camera folders → %s   (RAW → YEAR/raw/)", parent / tr("YEAR") / tr("MM.Month-photos | -videos"))
-            + "\n" + tr("Other folders → %s/<original folder>",
-                        parent / tr("YEAR") / "other" / "pictures | movies | other-files"))
-
-    def _backup_sets(self):
-        sets = {}
-        for p in find_backups(self.cfg):
-            sets.setdefault(Path(p).name, []).append(p)
-        return sets
-
-    def _fill_import_targets(self, mount=False):
-        if mount:
-            _log_mount_msgs(mount_for_paths_status(self.cfg.get("destinations", [])))
-        cur = self.import_target.currentText()
-        self.import_target.blockSignals(True)
-        self.import_target.clear()
-        for name in sorted(self._backup_sets()):
-            self.import_target.addItem(name)
-        idx = self.import_target.findText(cur) if cur else -1
-        self.import_target.setCurrentIndex(idx if idx >= 0 else 0)
-        self.import_target.blockSignals(False)
-        self._fill_import_copies()
-
-    def _fill_import_copies(self):
-        self.import_copies.clear()
-        copies = self._backup_sets().get(self.import_target.currentText(), [])
-        if not copies:
-            it = QListWidgetItem(tr("No backup found on the connected drives – make a phone backup first, "
-                                    "or connect the drives and click Refresh."))
-            it.setFlags(Qt.NoItemFlags)
-            self.import_copies.addItem(it)
-        sizes = [backup_totals(p) for p in copies]
-        for p, t in zip(copies, sizes):
-            it = QListWidgetItem(f"{p}    ({describe_totals(t)})")
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked)
-            it.setData(Qt.UserRole, p)
-            self.import_copies.addItem(it)
-
-        known = [t for t in sizes if t]
-        self.import_size.setText(
-            tr("Current state of the backup: %s",
-               f"<b>{describe_totals(max(known, key=lambda t: t[0]))}</b>")
-            + ("  " + tr("(the copies differ – the largest is shown)") if len(set(known)) > 1 else "")
-            if known else "")
-
-    def _start_import(self):
-        sel = self._import_selections()
-        other_files = self.import_other_check.isChecked()
-        if not self.import_scans:
-            QMessageBox.warning(self, tr("Cannot start yet"), tr("Add the folder(s) to import."))
-            return
-        if not sel:
-            QMessageBox.warning(self, tr("Cannot start yet"),
-                                tr("No folder is ticked – click “Choose folders to import…”."))
-            return
-        if self._import_new_mode():
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                self._mount_selected(self.import_dest_list)
-            finally:
-                QApplication.restoreOverrideCursor()
-            phone = self.import_phone_edit.text().strip()
-            owner = self.import_owner_edit.text().strip()
-            dests = self.import_dest_list.selected_available()
-            problems = []
-            if not phone:
-                problems.append(tr("Enter the name of the old phone."))
-            if not owner:
-                problems.append(tr("Enter the owner's name."))
-            if not dests:
-                problems.append(tr("Tick at least one connected destination drive."))
-            if problems:
-                QMessageBox.warning(self, tr("Cannot start yet"), "\n".join(problems))
-                return
-            name = backup_parent_name(phone, owner)
-            try:
-                check_selection(sel, [Path(d) / name for d in dests])
-            except ValueError as e:
-                QMessageBox.warning(self, tr("Cannot start yet"), str(e))
-                return
-            existing = [d for d in dests if (Path(d) / name).is_dir()]
-            if existing and QMessageBox.question(
-                    self, tr("Backup already exists"),
-                    tr("There is already a backup “%s” on", name) + "\n" + "\n".join(existing) + "\n\n" +
-                    tr("Add the files to it? (Files already in it are not copied twice.)")) \
-                    != QMessageBox.Yes:
-                return
-            self.last_folder = str(Path(dests[0]) / name)
-            ui.title(tr("Import old phone %s – %s", phone, owner))
-            self.run_job(lambda: perform_old_phone_import(sel, phone, owner, dests, self.cfg,
-                                                          other_files=other_files, interactive=True,
-                                                          cancel=self.cancel_event),
-                         self._import_done, awake=N_("Import"))
-            return
-
-        parents = [self.import_copies.item(i).data(Qt.UserRole) for i in range(self.import_copies.count())
-                   if self.import_copies.item(i).data(Qt.UserRole)
-                   and self.import_copies.item(i).checkState() == Qt.Checked]
-        try:
-            check_selection(sel, parents)
-        except ValueError as e:
-            QMessageBox.warning(self, tr("Cannot start yet"), str(e))
-            return
-        self.last_folder = parents[0]
-        ui.title(tr("Import into %s", Path(parents[0]).name))
-        self.run_job(lambda: perform_selection_import(sel, parents, self.cfg, other_files=other_files,
-                                                      interactive=True, cancel=self.cancel_event),
-                     self._import_done, awake=N_("Import"))
-
-    def _import_done(self, res):
-        status, paths, _results, verdict = res
-        self._finished(status, paths, verdict, N_("Import"))
-        self._fill_import_targets()
-        self._fill_export_sources()
-
     def _build_export_tab(self):
         w = QWidget()
         lay = QVBoxLayout(w)
@@ -1750,6 +1488,8 @@ class MainWindow(QMainWindow):
     def _build_settings_tab(self):
         w = QWidget()
         form = QFormLayout(w)
+        page = QWidget()
+        page_lay = QVBoxLayout(page)
         # Language (user request 2026-11-06): the same languages as VideoSpeedControl
         self.lang_combo = QComboBox()
         stored = i18n.stored_choice(self.cfg)
@@ -1793,11 +1533,6 @@ class MainWindow(QMainWindow):
         adb_box.addLayout(row)
         form.addRow(tr("ADB (cable backups):"), adb_box)
         self._update_adb_hint()
-        self.wait_spin = QSpinBox()
-        self.wait_spin.setRange(1, 300)
-        self.wait_spin.setSuffix(tr(" s"))
-        self.wait_spin.setValue(int(self.cfg.get("adb_wait_seconds", 20)))
-        form.addRow(tr("Wait for the phone (Connect button):"), self.wait_spin)
         self.fsync_check = WrapCheck(tr("Force data onto the disk before verifying (safer, slightly slower)"))
         self.fsync_check.setChecked(bool(self.cfg.get("fsync", True)))
         form.addRow("", self.fsync_check)
@@ -1818,7 +1553,28 @@ class MainWindow(QMainWindow):
         lab.setStyleSheet(f"color:{GRAY}")
         lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("", lab)
-        return w
+        page_lay.addWidget(_group(tr("General"), w))
+        # standard folders for new backups (user request 2026-11-10: DCIM/Camera unless changed)
+        self.default_folders = FolderListEditor(tr(
+            "Folders on the phone that a new backup starts with. Each backup can have its own folders "
+            "(Manage backups → Backups)."))
+        self.default_folders.set_folders(backuplist.default_folders(self.cfg))
+        self.default_folders.changed.connect(self._default_folders_changed)
+        self.default_folders.choose_requested.connect(
+            lambda: self._pick_phone_folders(self.default_folders.folders(),
+                                             lambda f: self.default_folders.set_folders(f, emit=True)))
+        page_lay.addWidget(_group(tr("Standard folders for new backups"), self.default_folders))
+        self.known_phones = KnownPhonesBox(self.cfg)
+        page_lay.addWidget(_group(tr("Known phones"), self.known_phones))
+        page_lay.addWidget(_group(tr("Versions and phone app"), self._build_phone_app_box()))
+        for i in range(page_lay.count()):          # as high as needed, the rest stays empty below
+            page_lay.itemAt(i).widget().setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        page_lay.addStretch()
+        return page
+
+    def _default_folders_changed(self, folders):
+        self.cfg["default_folders"] = list(folders)
+        config.save(self.cfg)
 
     def _build_bottom(self):
         w = QWidget()
@@ -1940,7 +1696,7 @@ class MainWindow(QMainWindow):
         if kind == "dir":
             return QFileDialog.getExistingDirectory(self, args[0], str(Path.home())) or ""
         if kind == "install":                 # installing on the phone: always asked, clearly
-            title, text, details = args
+            title, text, details, never_key = args
             self.showNormal()
             self.raise_()
             self.activateWindow()
@@ -1956,10 +1712,31 @@ class MainWindow(QMainWindow):
                         break
             box.setInformativeText(d)
             yes = box.addButton(tr("Install on the phone"), QMessageBox.AcceptRole)
-            no = box.addButton(tr("Not now"), QMessageBox.RejectRole)
+            # user decision 2026-11-10: the phone app may be kept up to date without asking again
+            auto = (box.addButton(tr("Install and update automatically from now on for this phone"),
+                                  QMessageBox.AcceptRole) if never_key else None)
+            # declining is always possible – the backup over the cable then runs without the app
+            no = box.addButton(tr("No – back up without the app"), QMessageBox.RejectRole)
+            never = (box.addButton(tr("Never ask for this phone"), QMessageBox.DestructiveRole)
+                     if never_key else None)
             box.setDefaultButton(no)
             box.setEscapeButton(no)
             box.exec()
+            if auto is not None and box.clickedButton() is auto:
+                lst = self.cfg.setdefault("companion_auto", [])
+                if never_key not in lst:
+                    lst.append(never_key)
+                    config.save(self.cfg)
+                ui.info(tr("The phone app is updated automatically on this phone from now on (Program "
+                           "settings → “Ask again before updating the phone app” undoes it)."))
+                return True
+            if never is not None and box.clickedButton() is never:
+                lst = self.cfg.setdefault("companion_never", [])
+                if never_key not in lst:
+                    lst.append(never_key)
+                    config.save(self.cfg)
+                ui.info(tr("The phone app will not be offered for this phone again (Program settings → "
+                           "“Install / update over USB cable…” still works)."))
             return box.clickedButton() is yes
         return None
 
@@ -1997,27 +1774,36 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(line)
 
     # ------------------------------------------------------------------ phone
-    def _status_headline(self, color):
-        src = self.source
-        if src is not None and color in (GREEN, ORANGE):
-            phone = f"{getattr(src, 'manufacturer', '')} {src.device_name or ''}".strip() or tr("Phone")
-            key = adbsetup.source_key(src)
-            conn = tr(CONN_SHORT[key]) if key in CONN_SHORT else getattr(src, "kind", "")
-            verified = getattr(src, "link", None) is not None or isinstance(src, CompanionSource)
-            return (tr("Connected: %s · %s · verified", phone, conn) if verified
-                    else tr("Connected: %s · %s", phone, conn))
-        return {ORANGE: tr("Action needed"), RED: tr("Not connected")}.get(color, tr("No phone connected"))
-
     def _set_phone_status(self, text, color, searching=False):
         """searching=True: the program is looking for / connecting to the phone (headline
         "Searching …") – a flag, so the (translated) text is never compared."""
-        head = self._status_headline(color)
-        if color == GRAY and searching:
-            head = tr("Searching for the phone …")
-        self.phone_status.show_status(head, text, color)
-        self.home_status.show_status(head, text, color)
+        level, head = self._conn_level(color)
+        if level == "none" and not paired_phones(self.cfg) and not lastbackup.phones(self.cfg):
+            text = tr("First time? Plug the phone in with the USB cable, unlock it and choose “File transfer” "
+                      "– the program connects by itself.")   # first run ever: the one thing to do
+        for banner in (self.phone_status, self.home_status):
+            banner.show_level(level, head, text)
         self._update_home()
+        if hasattr(self, "versions_label"):
+            self._update_versions()           # the connected phone's app version (or none)
         self._update_conn_hints()
+
+    def _conn_level(self, color):
+        """(level, headline): fast = USB cable with debugging; slow = any other connection;
+        possible = a phone is there or being connected, but not ready yet; none = nothing."""
+        src = self.source
+        if src is not None:
+            phone = f"{getattr(src, 'manufacturer', '')} {src.device_name or ''}".strip() or tr("Phone")
+            key = adbsetup.source_key(src)
+            conn = tr(CONN_SHORT[key]) if key in CONN_SHORT else tr(getattr(src, "kind", ""))
+            if isinstance(src, AdbSource) and not src.wireless:
+                return "fast", tr("Fast connection established: %s · %s", phone, conn)
+            return "slow", tr("Connected (slower connection): %s · %s", phone, conn)
+        if self.connecting:
+            return "possible", tr("Phone found – connecting …")
+        if color == ORANGE:
+            return "possible", tr("Phone found – not connected yet")
+        return "none", tr("No phone connected")
 
     # ------------------------------------------------------------------ start screen
     def _connected_phone(self):
@@ -2030,9 +1816,6 @@ class MainWindow(QMainWindow):
         w.setObjectName("phoneRow")
         w.setStyleSheet("#phoneRow{border:1px solid palette(mid);border-radius:6px}")
         g = QHBoxLayout(w)
-        w.pick = QCheckBox()
-        w.pick.setToolTip(tr("Tick to remove it from the list (several: tick several, or “Select all”)."))
-        g.addWidget(w.pick, 0, Qt.AlignVCenter)
         text = QVBoxLayout()
         w.title = QLabel()
         w.title.setStyleSheet("font-size:16px;font-weight:600")
@@ -2056,6 +1839,7 @@ class MainWindow(QMainWindow):
             self.conn_overview.set_active(adbsetup.source_key(self.source) if self.source else None)
         if not hasattr(self, "phone_rows"):
             return
+        self.connect_phone_btn.setVisible(self.source is None)      # only while no phone is there
         entries = lastbackup.phones(self.cfg)
         keys = [backup_parent_name(e["phone"], e.get("owner", "")) for e in entries]
         if list(self._phone_widgets) != keys:            # rebuild the rows
@@ -2095,8 +1879,9 @@ class MainWindow(QMainWindow):
 
     def _phone_backup_size(self, key, e):
         """Size of a phone's backup from a connected drive; remembered for when no drive is there."""
+        rel = setfolders.rel(e["phone"], e.get("owner", ""))       # <drive>/<Owner>/<Phone>
         for d in e.get("destinations", []):
-            t = backup_totals(Path(d) / key) if os.path.isdir(Path(d) / key) else None
+            t = backup_totals(Path(d) / rel) if os.path.isdir(Path(d) / rel) else None
             if t:
                 if [e.get("size_files"), e.get("size_bytes")] != list(t):
                     e["size_files"], e["size_bytes"] = t
@@ -2106,43 +1891,35 @@ class MainWindow(QMainWindow):
             return describe_totals((e["size_files"], e["size_bytes"])) + " " + tr("(drive not connected)")
         return tr("size shown when a backup drive is connected")
 
-    def _remove_phones(self):
-        keys = [k for k, w in self._phone_widgets.items() if w.pick.isChecked()]
-        if not keys:
-            QMessageBox.information(self, APP_NAME, tr("Tick one or more phones first (or “Select all”)."))
-            return
-        if QMessageBox.question(
-                self, tr("Remove from list"),
-                tr("Remove these phones from the list?") + "\n\n" + "\n".join(keys)
-                + "\n\n" + tr("Their backups on the drives are NOT deleted.")) != QMessageBox.Yes:
-            return
-        lastbackup.forget(self.cfg, keys)
-        self._update_home()
-
-    def _update_latest(self, key):
-        """"Update backup" of one phone: its own folders and drives, then the normal checks."""
+    def _update_latest(self, key, folders_once=None):
+        """"Update backup" of one backup: its standard folders (or `folders_once`) and its drives,
+        then the normal checks. Also for backups only found on a drive (no phone list entry)."""
         e = (self.cfg.get("phones") or {}).get(key)
-        if e is None:
-            return
+        if e is not None:
+            phone, owner, copies = e["phone"], e.get("owner", ""), []
+        else:
+            copies = self._backup_sets().get(key, [])
+            if not copies:
+                return
+            phone, owner = Path(copies[0]).name, Path(copies[0]).parent.name
+        dests = backuplist.drives(self.cfg, key, e, copies)
         known = self.cfg.get("destinations", [])
-        for d in e["destinations"]:
+        for d in dests:
             if d not in known:
                 known.append(d)
         self.cfg["destinations"] = known
-        self.cfg["selected_destinations"] = list(e["destinations"])
-        if e.get("owner"):
-            self.owner_edit.setText(e["owner"])
-        self.phone_edit.setText(e["phone"])
+        self.cfg["selected_destinations"] = list(dests)
+        if owner:
+            self.owner_edit.setText(owner)
+        self.phone_edit.setText(phone)
         self._auto_phone_name = ""
-        prof = self.cfg.get("backup_profiles", {}).get(key)
-        if prof is None:                         # backups found on a drive: their folders unknown
-            prof = {"folders": e.get("folders") or [CAMERA_FOLDER],
-                    "keep_structure": bool(e.get("keep_structure", False))}
-            self.cfg.setdefault("backup_profiles", {})[key] = prof
+        if key not in self.cfg.get("backup_profiles", {}):   # backups found on a drive: folders unknown
+            backuplist.save_profile(self.cfg, key, folders=(e or {}).get("folders") or backuplist.default_folders(self.cfg),
+                                    keep_structure=bool((e or {}).get("keep_structure", False)))
         config.save(self.cfg)
         self._load_profile()
         self.dest_list.rebuild()
-        self._start_backup()
+        self._start_backup(folders_once=folders_once)
 
     # ------------------------------------------------------------------ connection settings
     def _debug_off_changed(self, on):
@@ -2249,11 +2026,20 @@ class MainWindow(QMainWindow):
                     return None
                 # NEVER install or update anything on the phone without asking (user 2026-11-05)
                 phone = f"{src.manufacturer} {src.device_name}".strip() or tr("the phone")
+                if src.serial in self.cfg.get("companion_never", []):     # the user said "never"
+                    ui.info(tr("Backing up %s over the cable without the phone app (you chose not to "
+                               "install it).", phone))
+                    return link
                 title, text, details = install_question(state, phone, src.serial,
                                                         getattr(src, "companion_version", ""),
                                                         os.path.getsize(apk))
-                if not ui.ask_install(title, text, details):
-                    ui.info(tr("Nothing installed on %s (you chose “Not now”).", phone))
+                # asked first – unless the user chose "update automatically" for THIS phone (serial)
+                if src.serial in self.cfg.get("companion_auto", []):
+                    ui.info(tr("Updating the phone app automatically on %s (you chose this; Program "
+                               "settings → “Ask again before updating the phone app” undoes it).", phone))
+                elif not ui.ask_install(title, text, details, never_key=src.serial):
+                    ui.info(tr("Nothing installed on %s – the backup over the cable works without the app.",
+                               phone))
                     return link                   # an outdated app keeps working as before
                 ui.info(tr("Updating the phone app “%s” %s on %s (serial %s) over the USB cable …",
                            COMPANION_NAME, COMPANION_VERSION, phone, src.serial) if state == "outdated" else
@@ -2301,10 +2087,12 @@ class MainWindow(QMainWindow):
             if link is None or self.source is not src:
                 return
             src.link = link
-            self._set_phone_status(tr(
-                "Connected via ADB and verified: %s %s (Android %s) – the phone's key matches the "
-                "paired phone. Fast mode with hash check on the phone.",
-                src.manufacturer, src.device_name, src.android), GREEN)
+            self._remember_app_version(getattr(link, "entry", None), getattr(src, "companion_version", ""))
+            self._set_phone_status(
+                tr("Wireless debugging over Wi-Fi.") if src.wireless else
+                tr("Connected via ADB and verified: %s %s (Android %s) – the phone's key matches the "
+                   "paired phone. Fast mode with hash check on the phone.",
+                   src.manufacturer, src.device_name, src.android), GREEN)
 
         self.run_job(job, done, busy=True)
 
@@ -2318,6 +2106,12 @@ class MainWindow(QMainWindow):
         cable_cache = ""
         while not self._stop.is_set():
             now = time.monotonic()
+            if now >= self._hotspot_next and wireless.hotspot_supported():
+                self._hotspot_next = now + 3
+                try:
+                    self._hotspot_info = self._hotspot_check()
+                except Exception:  # noqa: BLE001 - only a progress display
+                    self._hotspot_info = None
             if isinstance(self.source, CompanionSource) and not self.busy and now >= next_check:
                 next_check = now + 10
                 if not self.source.is_connected():
@@ -2355,7 +2149,7 @@ class MainWindow(QMainWindow):
                                 and not any(st == "device" for _, st in devs)):
                             next_wifi = time.monotonic() + 10
                             addr = wireless.auto_connect(adb, self.cfg.get("wifi_last_address", ""),
-                                                         self.cfg.get("wifi_serials", []))
+                                                         wireless.known_serials(self.cfg))
                             if addr:
                                 wireless.remember(self.cfg, addr, adb)
                                 devs = adb_devices(adb)
@@ -2374,6 +2168,59 @@ class MainWindow(QMainWindow):
                     cable_cache, next_cable = "", 0.0
                 self.bridge.adb_state.emit((adb, devs, cable))
             self._stop.wait(2)
+
+    def _hotspot_check(self):
+        """Direct Wi-Fi progress (background thread; user request 2026-11-10: say what happens):
+        None = off, else {"clients": [ip], "app": bool, "adb": bool, "connected": bool, "since": t}."""
+        nets = wireless.hotspot_networks() if wireless.hotspot_active() else []
+        if not nets:
+            return None
+        old = self._hotspot_info or {}
+        src = self.source
+        key = adbsetup.source_key(src) if src is not None else None
+        addr = getattr(src, "address", None) or (getattr(src, "serial", "") if key == "wifi_adb" else "")
+        info = {"clients": wireless.hotspot_clients(nets), "app": False, "adb": False,
+                "connected": key in ("app_wifi", "wifi_adb") and wireless.over_hotspot(addr, nets),
+                "since": old.get("since") or time.monotonic(), "joined_at": old.get("joined_at")}
+        if info["clients"] and not info["joined_at"]:
+            info["joined_at"] = time.monotonic()
+        if not info["clients"]:
+            info["joined_at"] = None
+        if info["clients"] and not info["connected"]:
+            adb = find_adb(self.cfg)
+            if adb:
+                known = set(wireless.known_serials(self.cfg))
+                info["adb"] = any(m.kind == wireless.CONNECT and wireless.service_serial(m.name) in known
+                                  and wireless.over_hotspot(m.address, nets) for m in wireless.mdns_services(adb))
+            for p in (self.cfg.get("companion_phones") or {}).values():
+                a = p.get("address", "")
+                host = a.rpartition(":")[0]
+                if host in info["clients"] and wireless._port_open(a):
+                    info["app"] = True
+        return info
+
+    def hotspot_progress_text(self):
+        """(text, color) for the Direct Wi-Fi progress, or None when it is off / not known yet."""
+        info = self._hotspot_info
+        if not info:
+            return None
+        ssid = self.cfg.get("hotspot_ssid", "")
+        if info["connected"]:
+            return tr("The phone is connected over Direct Wi-Fi."), GREEN
+        if not info["clients"]:
+            return tr("Direct Wi-Fi “%s” is on. Waiting for the phone to join it: on the phone, choose this "
+                      "network in the Wi-Fi settings (or scan the QR code in “Direct Wi-Fi…”).", ssid), GRAY
+        if info["app"] or info["adb"]:
+            return tr("The phone is in Direct Wi-Fi and answers – connecting …"), GRAY
+        waited = time.monotonic() - (info.get("joined_at") or time.monotonic())
+        text = tr("The phone has joined Direct Wi-Fi (%s). Now on the phone:", info["clients"][0]) + "\n" + tr(
+            "• if it asks “Allow wireless debugging on this network?”, tap “Allow” "
+            "(tick “Always allow on this network”), or\n"
+            "• open “My Media Backup” and tap “Start backup mode”.")
+        if waited > 30:
+            text += "\n" + tr("Still nothing after %d s? Look at the phone's notifications – the question may "
+                              "be hidden there.", int(waited))
+        return text, ORANGE
 
     def _on_companion_found(self, found):
         entry, addr = found
@@ -2403,6 +2250,21 @@ class MainWindow(QMainWindow):
 
         self.run_job(attempt, self._on_connected, busy=False)
 
+    def _connect_phone_dialog(self):
+        """QR code / Bluetooth for a paired phone (user request 2026-11-10)."""
+        from .gui_wireless import ConnectPhoneDialog
+        if self.source is not None:
+            QMessageBox.information(self, tr("Connect phone"), tr("%s is already connected.",
+                                                                  self._connected_phone() or tr("A phone")))
+            return
+        if not paired_phones(self.cfg):          # first run ever: install the app and pair it
+            from .gui_wireless import PhoneAppDialog
+            PhoneAppDialog(self, self.cfg, first_run=True).exec()
+            return
+        dlg = ConnectPhoneDialog(self, self.cfg, lambda: self.source is not None)
+        dlg.found.connect(self._on_companion_found)
+        dlg.exec()
+
     def _on_companion_lost(self):
         if isinstance(self.source, CompanionSource) and not self.busy:
             self.source = None
@@ -2428,7 +2290,8 @@ class MainWindow(QMainWindow):
             return
         src = self.source
         usb_ready = [s for s, st in (devs or []) if st == "device" and not wireless.is_wireless(s)]
-        slower = src is not None and (not isinstance(src, AdbSource) or src.wireless)
+        slower = (src is not None and (not isinstance(src, AdbSource) or src.wireless)
+                  and not getattr(self, "_manual_conn", None))
         if slower and usb_ready and time.monotonic() >= self._adb_retry_at:
             # always the fastest: a phone with USB debugging on the cable beats Wi-Fi / MTP
             ui.info(tr("USB debugging on the cable found – switching from %s to the cable "
@@ -2442,13 +2305,23 @@ class MainWindow(QMainWindow):
         if isinstance(src, AdbSource):
             if devs is None or src.serial not in [s for s, st in devs if st == "device"]:
                 self.source = None
+                self._manual_conn = None
                 self._set_phone_status(tr("The phone was disconnected."), GRAY)
             return
+        if src is not None and adbsetup.source_key(src) == "mtp" and not cable and not usb_ready \
+                and getattr(src, "auto_mtp", False):
+            self.source = src = None             # file-transfer phone unplugged
+            self._set_phone_status(tr("The phone was disconnected."), GRAY)
         if src is not None:          # phone app / MTP / folder source: keep it
             return
         if adb is None:
-            self._set_phone_status(tr("ADB is not installed (see README). Click “Connect phone” to use "
-                                      "the MTP fallback."), ORANGE)
+            if cable:
+                self._auto_file_transfer(cable)
+            elif self.hotspot_progress_text():
+                self._set_phone_status(*self.hotspot_progress_text())
+            else:
+                self._set_phone_status(tr("No phone connected yet. Plug the phone in with the USB cable and "
+                                          "choose “File transfer” on the phone."), GRAY)
             return
         ready = wireless.usb_first([s for s, st in devs if st == "device"])
         if ready and time.monotonic() >= self._adb_retry_at:
@@ -2467,18 +2340,277 @@ class MainWindow(QMainWindow):
             self._set_phone_status(tr("Phone found: unlock it and tap “Allow USB debugging” "
                                       "(tick “Always allow from this computer”)."), ORANGE)
         elif cable:
-            app = bool(self.cfg.get("companion_phones"))
-            self._set_phone_status(
-                tr("%s is on the USB cable, but USB debugging is off – the computer cannot read "
-                   "it yet.", cable) + " " +
-                (tr("On the phone open “My Media Backup” and tap “Allow backup over "
-                    "cable” (or switch on USB debugging in the Developer options).")
-                 if app else tr("Switch on USB debugging on the phone – see “Switch on "
-                                "USB debugging (first time)…” in the backup settings.")), ORANGE)
+            self._auto_file_transfer(cable)
+        elif self.hotspot_progress_text():
+            self._set_phone_status(*self.hotspot_progress_text())
         else:
             self._set_phone_status(tr("No phone connected yet. Plug it in (USB debugging on) or switch "
                                       "on Wireless debugging on a paired phone – it is detected "
                                       "automatically."), GRAY)
+
+    def _auto_file_transfer(self, cable):
+        """A phone on the USB cable without USB debugging: use its normal "File transfer" (MTP) by
+        itself – the simple way that works on every phone, without app, debugging or network (user
+        request 2026-11-10). Slower; a faster connection replaces it as soon as there is one."""
+        app = bool(self.cfg.get("companion_phones"))
+        faster = (tr("Faster: open “My Media Backup” on the phone and tap “Allow backup over cable”.") if app
+                  else tr("Faster later: USB debugging or the phone app (Program settings)."))
+        if time.monotonic() < getattr(self, "_mtp_next", 0.0):
+            return
+        self._mtp_next = time.monotonic() + 8
+        first = not getattr(self, "_mtp_tried", False)
+        self._mtp_tried = True
+        self.connecting = True
+        if first:
+            self._set_phone_status(tr("%s is on the USB cable – connecting via file transfer …", cable), GRAY)
+
+        def done(res):
+            src, why = res
+            self.connecting = False
+            if src is not None:
+                src.auto_mtp = True
+                self._mtp_tried = False
+                ui.ok(tr("Connected via file transfer (MTP): %s", src.device_name or cable))
+                self._on_connected(src)
+                self._offer_app_by_file_transfer(src)
+                return
+            self._set_phone_status(
+                tr("%s is on the USB cable, but its photos cannot be read yet. On the phone: unlock it, tap "
+                   "the notification “Charging this device via USB” / “File transfer” and choose “File "
+                   "transfer”.", cable) + (f" ({why})" if why else "") + " " + faster, ORANGE)
+
+        self.run_job(find_mtp, done, busy=False)
+
+    def _offer_app_by_file_transfer(self, src):
+        """Phone on the cable in "File transfer": offer the phone app once per phone and session –
+        asked, explained, declinable (user request 2026-11-10). The backup works without it."""
+        from .companion import APP_VERSION_NAME
+        name = src.device_name or ""
+        # asked ONCE per phone and app version – remembered in the settings, also after a restart
+        # (user 2026-11-10: it asked again after the program was restarted)
+        offered = self.cfg.setdefault("app_offered", {})
+        if (offered.get(name) == APP_VERSION_NAME or name in self.cfg.get("companion_never", [])
+                or apk_path() is None):
+            return
+
+        def same(a, b):          # "Google Pixel 10 Pro" (file transfer) = "Pixel 10 Pro" (phone app)
+            a, b = a.lower().strip(), b.lower().strip()
+            return bool(a and b) and (a in b or b in a)
+        known = [p for p in paired_phones(self.cfg) if same(name, p.get("name") or "")]
+        if known and all(p.get("app_version") == APP_VERSION_NAME for p in known):
+            return                                   # this phone has the current app already
+        offered[name] = APP_VERSION_NAME
+        config.save(self.cfg)
+        box = QMessageBox(QMessageBox.Question, tr("Phone app for %s?", name or tr("the phone")), tr(
+            "%s is connected with the USB cable (file transfer). The backup works like this – slower, "
+            "but without anything on the phone.", name or tr("The phone")) + "\n\n" + tr(
+            "Why the phone app “%s” (version %s)? It makes backups faster and easier: one tap switches "
+            "the fast cable mode on (and off again afterwards), and backups over Wi-Fi work without a "
+            "cable. It can only read photos and videos.", COMPANION_NAME, APP_VERSION_NAME) + "\n\n" + tr(
+            "“Copy onto the phone” puts the app file into the phone's Download folder – nothing is "
+            "installed by itself; you install it on the phone (Files → Downloads → tap the file)."),
+            parent=self)
+        copy = box.addButton(tr("Copy onto the phone"), QMessageBox.AcceptRole)
+        no = box.addButton(tr("No – back up without the app"), QMessageBox.RejectRole)
+        never = box.addButton(tr("Never ask for this phone"), QMessageBox.DestructiveRole)
+        box.setDefaultButton(no)
+        box.setEscapeButton(no)
+        box.exec()
+        if box.clickedButton() is never:
+            self.cfg.setdefault("companion_never", []).append(name)
+            config.save(self.cfg)
+        elif box.clickedButton() is copy:
+            self._copy_app_by_file_transfer(src, asked=True)
+
+    # ------------------------------------------------------------------ which connection (2026-11-10)
+    def _start_conn_probe(self, then=None):
+        """Background check of all connections (no new connection is made, nothing is changed)."""
+        if self._probing or (self.busy and then is None):
+            return
+        self._probing = True
+        cfg, src = self.cfg, self.source
+        cur = adbsetup.source_key(src) if src is not None else None
+
+        def run():
+            p = {"mtp": cur == "mtp", "app_wifi": cur == "app_wifi",
+                 "adb_usb": cur in ("adb_app", "adb_manual"), "adb_wifi": cur == "wifi_adb"}
+            try:
+                p.update(usb_phone=adbsetup.detect_usb_phone(), usb_mbit=phoneid.usb_speed_mbit(),
+                         wifi_mbit=connspeed.wifi_link_mbit())
+                adb = find_adb(cfg)
+                if adb:
+                    devs = adb_devices(adb)
+                    p["adb_usb"] = p["adb_usb"] or any(st == "device" and not wireless.is_wireless(s)
+                                                       for s, st in devs)
+                    p["adb_wifi"] = p["adb_wifi"] or any(st == "device" and wireless.is_wireless(s)
+                                                         for s, st in devs)
+                    if not p["adb_wifi"]:
+                        known = set(wireless.known_serials(cfg))
+                        p["adb_wifi"] = any(m.kind == wireless.CONNECT and wireless.service_serial(m.name) in known
+                                            for m in wireless.mdns_services(adb))
+                if not p["app_wifi"] and paired_phones(cfg):
+                    p["app_wifi"] = find_phone(cfg)[0] is not None
+                p["hotspot_possible"] = wireless.hotspot_supported() and bool(paired_phones(cfg))
+                nets = wireless.hotspot_networks() if wireless.hotspot_active() else []
+                p["hotspot_on"] = bool(nets)
+                addr = getattr(src, "address", None) or (getattr(src, "serial", "") if cur == "wifi_adb" else "")
+                p["hotspot_used"] = cur in ("app_wifi", "wifi_adb") and wireless.over_hotspot(addr, nets)
+            except Exception:  # noqa: BLE001 - only a hint
+                pass
+            finally:
+                p["_then"] = then
+                self.bridge.conn_probe.emit(p)       # always - also after an error
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_conn_probe(self, p):
+        self._probing = False
+        then = p.pop("_then", None)
+        self._conn_rows = connspeed.options(p, self.cfg.get("speed_seen"))
+        hint = ""
+        if self.source is not None:
+            cur = connspeed.current_key(adbsetup.source_key(self.source))
+            better = connspeed.faster_than(self._conn_rows, cur)
+            if better:
+                now = next((r for r in self._conn_rows if r["key"] == cur), None)
+                hint = tr("Faster possible: %s (about %.0f MB/s instead of %.0f MB/s) – click “Possible connections”.",
+                          better["label"], better["speed"], now["speed"] if now else 0)
+        for banner in (self.home_status, self.phone_status):
+            banner.set_hint(hint)
+        if getattr(self, "_conn_dialog", None):     # the open window shows the new result
+            self._fill_connection_dialog()
+        if then:
+            then()
+
+    def _choose_connection(self):
+        """All connections with their speed; the user may choose one (user request 2026-11-10).
+        Opens at once with the last check; a new check runs meanwhile and refreshes the window."""
+        if not self._conn_rows:          # nothing checked yet: at least the connection in use
+            cur = adbsetup.source_key(self.source) if self.source is not None else None
+            self._conn_rows = connspeed.options(
+                {"mtp": cur == "mtp", "app_wifi": cur == "app_wifi", "adb_usb": cur in ("adb_app", "adb_manual"),
+                 "adb_wifi": cur == "wifi_adb", "usb_mbit": phoneid.usb_speed_mbit()},
+                self.cfg.get("speed_seen"))
+        self._start_conn_probe()
+        self._show_connection_dialog()
+
+    def _show_connection_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Possible connections"))
+        QVBoxLayout(dlg)
+        self._conn_dialog = (dlg, None)
+        self._fill_connection_dialog()
+        dlg.setMinimumWidth(700)          # height: as high as its content (_fill_connection_dialog)
+        dlg.exec()
+        self._conn_dialog = None
+
+    def _fill_connection_dialog(self):
+        dlg, old = self._conn_dialog      # refill after a new check: swap the whole content
+        content = QWidget()
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(0, 0, 0, 0)
+        if old is not None:
+            old.hide()
+            dlg.layout().removeWidget(old)
+            old.deleteLater()
+        dlg.layout().addWidget(content)
+        self._conn_dialog = (dlg, content)
+        cur = connspeed.current_key(adbsetup.source_key(self.source)) if self.source is not None else None
+        lab = QLabel(tr("All ways to reach the phone, fastest first. The speed is from your own backups "
+                        "when there were some, otherwise estimated from the USB / Wi-Fi link."))
+        lab.setWordWrap(True)
+        lay.addWidget(lab)
+        # the former "Faster…" (user request 2026-11-10): how this connection could be faster
+        if cur != "adb_usb":
+            tip = QLabel(self._faster_hint_html())
+            tip.setWordWrap(True)
+            tip.setTextFormat(Qt.RichText)
+            tip.setStyleSheet("QLabel{background:#fff4c2;color:#3a2e00;border-radius:6px;padding:8px}")
+            lay.addWidget(tip)
+            how = QPushButton(tr("Show me how (step by step)…"))
+            how.clicked.connect(self._show_usb_guide)
+            lay.addWidget(how, 0, Qt.AlignLeft)
+        grid = QFormLayout()
+        for r in self._conn_rows:
+            row = QHBoxLayout()
+            used = r["key"] == cur or r.get("in_use")
+            state = (tr("in use") if used else tr("possible") if r["available"] else r["note"])
+            text = QLabel(f"<b>{html.escape(r['label'])}</b> – {tr('about %.0f MB/s', r['speed'])}<br>"
+                          f"<span style='color:{GREEN if r['available'] else GRAY}'>{html.escape(state)}</span>")
+            text.setWordWrap(True)
+            row.addWidget(text, 1)
+            if not used and (r["available"] or r.get("can_start")):
+                b = QPushButton(tr("Use"))
+                b.clicked.connect(lambda _c=False, k=r["key"]: (dlg.accept(), self._use_connection(k)))
+                row.addWidget(b)
+            grid.addRow(row)
+        lay.addLayout(grid)
+        auto = QPushButton(tr("Automatic (always the fastest)"))
+        auto.setToolTip(tr("The program chooses by itself again and switches to the cable when possible."))
+        auto.clicked.connect(lambda: (dlg.accept(), self._use_connection(None)))
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        row = QHBoxLayout()
+        row.addWidget(auto)
+        row.addStretch()
+        row.addWidget(bb)
+        lay.addLayout(row)
+        if self._probing:
+            wait = QLabel(tr("Checking all connections …"))
+            wait.setStyleSheet(f"color:{GRAY}")
+            lay.addWidget(wait)
+        lay.activate()                    # word-wrapped labels: as high as needed, nothing cut off
+        h = content.heightForWidth(680)
+        if h <= 0:
+            h = content.sizeHint().height()
+        dlg.setMinimumSize(700, h + 24)
+        dlg.resize(700, h + 24)
+
+    def _use_connection(self, key):
+        """Switch to the chosen connection (None = automatic again). The choice holds until the
+        phone is disconnected; the backup checks (right phone, hashes) are the same for all."""
+        self._manual_conn = key
+        if key is None:
+            self._adb_retry_at = 0
+            ui.info(tr("Connection: automatic again (always the fastest)."))
+            return
+        if key == "hotspot":
+            self._direct_wifi()
+            return
+        old, self.source = self.source, None
+        if isinstance(old, CompanionSource):
+            try:
+                old.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self.connecting = True
+        self._set_phone_status(tr("Switching to %s …", tr(connspeed.LABELS[key])), GRAY)
+        cfg = self.cfg
+
+        def connect():
+            adb = find_adb(cfg)
+            if key == "mtp":
+                return find_mtp()[0]
+            if key == "app_wifi":
+                entry, addr = find_phone(cfg)
+                return CompanionSource(entry, addr) if entry else None
+            if not adb:
+                return None
+            if key == "wifi_adb" and not any(wireless.is_wireless(s) for s, st in adb_devices(adb) if st == "device"):
+                wireless.auto_connect(adb, cfg.get("wifi_last_address", ""), wireless.known_serials(cfg))
+            want_wifi = key == "wifi_adb"
+            serials = [s for s, st in adb_devices(adb) if st == "device" and wireless.is_wireless(s) == want_wifi]
+            return AdbSource(adb, serials[0]) if serials else None
+
+        def done(src):
+            if src is None:
+                ui.warn(tr("%s did not work – back to automatic.", tr(connspeed.LABELS[key])))
+                self._manual_conn = None
+            elif key == "mtp":
+                src.auto_mtp = True
+            self._on_connected(src)
+
+        self.run_job(connect, done, busy=False)
 
     def _pair_wifi(self):
         from .gui_wireless import WifiPairDialog
@@ -2526,21 +2658,24 @@ class MainWindow(QMainWindow):
                    "phone, or change the smartphone name in “Backup settings”.",
                    src.manufacturer, src.device_name, tr(src.kind), typed))
         if isinstance(src, CompanionSource):
-            self._set_phone_status(tr(
-                "Connected via the phone app: %s %s (Android %s) – Wi-Fi, encrypted, read-only, hash "
-                "check on the phone. Backup mode on the phone switches off after the backup.",
-                src.manufacturer, src.device_name, src.android), GREEN)
+            self._remember_app_version(src.entry, src.app_version)
+            self._set_phone_status(tr("Phone app over Wi-Fi – encrypted, read-only."), GREEN)
             if not src.full_access:
                 QMessageBox.warning(self, tr("Phone app"), tr("The app on the phone has no full access to "
                                     "photos and videos. Open it on the phone and tap “Allow access” "
                                     "→ “Allow all”."))
         elif isinstance(src, AdbSource):
             how = tr("ADB over Wi-Fi") if src.wireless else "ADB"
-            self._set_phone_status(tr("Connected via %s: %s %s (Android %s) – fast mode with hash check "
-                                      "on the phone.", how, src.manufacturer, src.device_name, src.android)
-                                   + (" " + tr("Keep the phone near the computer and on a charger.")
-                                      if src.wireless else ""), GREEN)
+            self._set_phone_status(
+                tr("Wireless debugging over Wi-Fi.") if src.wireless else
+                tr("Connected via %s: %s %s (Android %s) – fast mode with hash check on the phone.",
+                   how, src.manufacturer, src.device_name, src.android), GREEN)
+            if not src.wireless:
+                wireless.remember_serial(self.cfg, src.serial)   # may later use Wireless debugging
             self._cable_setup(src)
+        elif not getattr(src, "fallback_reason", None):     # file transfer chosen automatically
+            self._set_phone_status(tr("Connected via file transfer: works on every phone, but slower."),
+                                   GREEN)
         else:
             reason = getattr(src, "fallback_reason", "") or ""
             self._set_phone_status(tr("Connected via %s. ADB did not work: %s", tr(src.kind), reason), ORANGE)
@@ -2554,22 +2689,51 @@ class MainWindow(QMainWindow):
 
     def _say_connection(self, src):
         """Log which connection is used and - if it is not the fastest - how to get a faster one."""
+        return                           # the status box says it – nothing in the log (user 2026-11-10)
         key = adbsetup.source_key(src)
         conn = adbsetup.CONNECTIONS_BY_KEY[key]
         if key in ("adb_app", "adb_manual") and not src.wireless:
             mbit = phoneid.usb_speed_mbit()
             if mbit is not None and mbit < 5000:
-                ui.warn(tr("Connection: %s – only USB 2 speed. A USB 3 cable and port are "
+                ui.info(tr("Connection: %s – only USB 2 speed. A USB 3 cable and port are "
                            "about 2× faster.", tr(conn.short)))
             else:
                 ui.ok(tr("Connection: %s – the fastest connection.", tr(conn.short)))
             return
+        if key == "mtp":                 # nothing in the log – the status bar has the hint (user 2026-11-10)
+            return
         on_cable = adbsetup.detect_usb_phone()
-        ui.warn(tr("Connection: %s (%s) – not the fastest.", tr(conn.short), conn.speed_short) + " "
+        ui.info(tr("Connection: %s (%s) – not the fastest.", tr(conn.short), conn.speed_short) + " "
                 + (tr("The %s is on the USB cable: tap “Allow backup over cable” in the phone "
                       "app – the program then switches to the cable by itself.", on_cable) if on_cable else
                    tr("Faster: plug the phone in with a USB cable and tap “Allow backup over cable” in "
                       "the phone app – the program switches to the cable by itself.")))
+
+    def _faster_hint_html(self):
+        """Why and how the current connection could be faster: USB cable with USB debugging."""
+        app = bool(paired_phones(self.cfg))
+        head = (tr("Your connection could be faster.") if self.source is not None
+                else tr("The fastest connection:"))
+        return ("<b>" + html.escape(head) + "</b> " + html.escape(tr(
+                    "USB cable with USB debugging is about 2–4× faster than file transfer or Wi-Fi, and every "
+                    "file is checked on the phone itself.")) + "<br><br>"
+                + ("<b>" + html.escape(tr("With the phone app (easiest):")) + "</b> " + html.escape(tr(
+                    "plug in the USB cable, open “My Media Backup” on the phone and tap “Allow backup over "
+                    "cable”. The program switches by itself; USB debugging goes off again after the "
+                    "backup.")) + "<br>" if app else "")
+                + "<b>" + html.escape(tr("By hand (once):")) + "</b> " + html.escape(tr(
+                    "switch on USB debugging in the phone's Developer options, plug in the cable and tap "
+                    "“Allow” when the phone asks."))
+                + "<br>" + html.escape(tr("A USB 3 cable and port are about 2× faster than USB 2.")))
+
+    def _usb_debug_hint(self):
+        """How to get from file transfer to the much faster USB debugging."""
+        if paired_phones(self.cfg):
+            return tr("Much faster (about 2–4×): USB debugging. On the phone open “My Media Backup” and tap "
+                      "“Allow backup over cable” – the program then switches by itself.")
+        return tr("Much faster (about 2–4×): USB debugging. Switch it on once in the phone's Developer "
+                  "options – “Faster: USB debugging…” shows how, step by step. The program then switches "
+                  "by itself.")
 
     def _find_fastest(self):
         """Check every way to reach a phone, use the fastest, say what would be faster."""
@@ -2594,7 +2758,7 @@ class MainWindow(QMainWindow):
                             p[key] = serials[0]
                 if not wifi:
                     addr = wireless.auto_connect(adb, cfg.get("wifi_last_address", ""),
-                                                 cfg.get("wifi_serials", []))
+                                                 wireless.known_serials(cfg))
                     if addr:
                         p["adb_wifi"] = addr
             if paired_phones(cfg):
@@ -2643,11 +2807,11 @@ class MainWindow(QMainWindow):
 
     def _save_profile(self):
         key = self._profile_key()
-        if key:
-            self.cfg.setdefault("backup_profiles", {})[key] = {
-                "folders": list(self.cfg.get("source_folders") or []),
-                "keep_structure": bool(self.cfg.get("keep_structure", False))}
-        config.save(self.cfg)
+        if key:                    # only these two fields - drives and import folders stay
+            backuplist.save_profile(self.cfg, key, folders=list(self.cfg.get("source_folders") or []),
+                                    keep_structure=bool(self.cfg.get("keep_structure", False)))
+        else:
+            config.save(self.cfg)
 
     def _load_profile(self):
         self._apply_dest_filter()
@@ -2655,9 +2819,7 @@ class MainWindow(QMainWindow):
         key = self._profile_key()
         if not key:
             return
-        prof = self.cfg.get("backup_profiles", {}).get(key)
-        if prof is None:                       # a backup without its own list: the camera only
-            prof = {"folders": [CAMERA_FOLDER], "keep_structure": False}
+        prof = backuplist.profile(self.cfg, key)      # without its own list: the standard folders
         if (prof["folders"] != self.cfg.get("source_folders")
                 or prof["keep_structure"] != bool(self.cfg.get("keep_structure", False))):
             self.cfg["source_folders"] = list(prof["folders"])
@@ -2728,7 +2890,7 @@ class MainWindow(QMainWindow):
         if not dests:
             self.preview.setText(f"<i>{tr('No destination ticked.')}</i>")
             return
-        name = backup_parent_name(phone or tr("<phone>"), owner or tr("<owner>"))
+        name = setfolders.rel(phone or tr("<phone>"), owner or tr("<owner>"))   # Owner/Phone
         lines = []
         for d in dests:
             ok = os.path.isdir(d)
@@ -2761,7 +2923,8 @@ class MainWindow(QMainWindow):
             location_list.update_status()
             self._update_preview()
 
-    def _start_backup(self):
+    def _start_backup(self, folders_once=None):
+        """folders_once: back up these phone folders this time (the standard folders stay)."""
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             self._mount_selected(self.dest_list)
@@ -2770,7 +2933,7 @@ class MainWindow(QMainWindow):
         owner = self.owner_edit.text().strip()
         phone = self.phone_edit.text().strip()
         dests = self.dest_list.selected_available()
-        folders = list(self.cfg.get("source_folders") or [])
+        folders = list(folders_once or self.cfg.get("source_folders") or [])
         problems = []
         if not folders:
             problems.append(tr("Choose at least one folder on the phone (e.g. “Camera”)."))
@@ -2786,15 +2949,19 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, tr("Cannot start yet"), "\n".join(problems))
             return
         src = self.source
-        parents = [Path(d) / backup_parent_name(phone, owner) for d in dests]
+        for d in dests:                       # old 'Phone - Owner' folders -> Owner/Phone first,
+            setfolders.relocate(d, self.cfg)  # so the phone check sees the existing backup
+        parents = [Path(d) / setfolders.rel(phone, owner) for d in dests]
         confirmed = self._check_phone(src, phone, owner, parents)
         if confirmed is not None:
-            folders = self._check_folders(src, folders)
+            folders = self._check_folders(src, folders, keep_list=folders_once is None)
             if folders is None:
                 return
         if confirmed is None:
             return
         pid, results = confirmed
+        if not ask_layout(self, self.cfg, parents):      # which old month folders are kept
+            return
         self.cfg["owner"] = owner
         self._save_profile()
         self.last_folder = str(parents[0])
@@ -2837,7 +3004,7 @@ class MainWindow(QMainWindow):
 
         self.run_job(job, self._backup_done, awake=N_("Backup"))
 
-    def _check_folders(self, src, folders):
+    def _check_folders(self, src, folders, keep_list=True):
         """Folders of the list that are not on this phone (e.g. from another phone): say so and
         leave them out. Returns the folders to back up, or None (cancelled)."""
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -2867,7 +3034,8 @@ class MainWindow(QMainWindow):
                 + "\n\n" + "\n".join(drop[:15]) + ("\n…" if len(drop) > 15 else "")
                 + "\n\n" + tr("Remove them from this backup's list and start?")) != QMessageBox.Yes:
             return None
-        self._set_folders(keep)
+        if keep_list:                  # the standard folders - not for a one-time choice
+            self._set_folders(keep)
         return keep
 
     def _check_phone(self, src, phone, owner, parents):
@@ -2935,6 +3103,10 @@ class MainWindow(QMainWindow):
         status, paths, results, verdict = res
         phone, owner, folders, dests = self._running_backup
         new = [r for r in results if r.newly_written]
+        t = ui.last_transfer
+        if t and self.source is not None:            # real speed of this connection, for the hints
+            connspeed.remember(self.cfg, connspeed.current_key(adbsetup.source_key(self.source)),
+                               t.get("bytes", 0), t.get("seconds", 0))
         lastbackup.record(self.cfg, phone, owner, folders, dests, len(new),
                           sum(r.sf.size for r in new), status,
                           model=getattr(self.source, "device_name", "") or "",
@@ -2966,7 +3138,7 @@ class MainWindow(QMainWindow):
         self._fill_export_sources()
         from . import plans
         if status == "COMPLETED":                 # Grandfather-Father-Son drives: suggest cleanup
-            name = backup_parent_name(phone, owner)
+            name = setfolders.rel(phone, owner)
             for base in dests:
                 set_dir = Path(base) / name
                 if plans.folder_plan(set_dir) == plans.GFS:
@@ -3053,15 +3225,15 @@ class MainWindow(QMainWindow):
             if simple:
                 sets[name] = simple
         for e in self.cfg.get("extra_export_sources", []):
-            if os.path.isdir(e) and e not in sets.get(Path(e).name, []):
-                sets.setdefault(Path(e).name, []).append(e)
+            if os.path.isdir(e) and e not in sets.get(setfolders.key_of(e), []):
+                sets.setdefault(setfolders.key_of(e), []).append(e)
         return sets
 
     def _fill_export_sources(self, select=None, mount=False):
         if mount:
             _log_mount_msgs(mount_for_paths_status(self.cfg.get("destinations", [])))
         cur_path = select or self.export_src.currentData()
-        cur_name = Path(cur_path).name if cur_path else self.export_set.currentText()
+        cur_name = setfolders.key_of(cur_path) if cur_path else self.export_set.currentText()
         self.export_set.blockSignals(True)
         self.export_set.clear()
         for name in sorted(self._export_sets()):
@@ -3108,7 +3280,7 @@ class MainWindow(QMainWindow):
         tgt = self.export_targets.selected_available()
         if not src or not tgt:
             return src, None, None
-        return src, tgt[0], Path(tgt[0]) / Path(src).name
+        return src, tgt[0], Path(tgt[0]) / setfolders.rel_of(src)
 
     # ---- cloud storage (Google Drive): a mirror, only new files, nothing deleted
     def _add_cloud(self, service):
@@ -3248,7 +3420,7 @@ class MainWindow(QMainWindow):
         self.export_cleanup_btn.setEnabled(False)
         self.export_runs.clear()
         mode = self._mode()
-        name = Path(src).name if src else None
+        name = setfolders.rel_of(src) if src else None       # Google Drive: 'Owner/Phone'
         signed = gdrive.signed_in_email()
         info, warn = [], []
         if mode == "mirror":
@@ -3339,6 +3511,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, tr("Cannot start yet"), tr("Sign in to Google Drive first "
                                 "(“Add to cloud storage” → Google Drive)."))
             return
+        if not ask_layout(self, self.cfg, [src]):        # which old month folders are kept
+            return
         self.last_folder = None
         mode = self._mode()
         if mode == "mirror":
@@ -3346,7 +3520,7 @@ class MainWindow(QMainWindow):
             self.run_job(lambda: gdrive.perform_drive_export(src, self.cfg, cancel=self.cancel_event),
                          self._gdrive_export_done, awake=N_("Export"))
             return
-        name = Path(src).name
+        name = setfolders.rel_of(src)
         if self._gdrive_runs.get(name) == "loading":
             QMessageBox.information(self, APP_NAME, tr("Still reading the exports on Google Drive – "
                                                        "please try again in a moment."))
@@ -3451,7 +3625,7 @@ class MainWindow(QMainWindow):
             if sel and is_cloud(sel[0]):
                 src = self.export_src.currentData()
                 if src:
-                    self._cleanup_gdrive(Path(src).name, after_export)
+                    self._cleanup_gdrive(setfolders.rel_of(src), after_export)
                 return
             _src, _tgt, tparent = self._export_target_parent()
         if not tparent or not has_catalog(tparent):
@@ -3532,6 +3706,8 @@ class MainWindow(QMainWindow):
                 self, tr("Same drive"), tr("The second storage is on the same drive as the backup.\n"
                                            "Continue anyway?")) != QMessageBox.Yes:
             return
+        if not ask_layout(self, self.cfg, [src, tparent]):   # which old month folders are kept
+            return
         mode = [m for m, b in self.mode_buttons.items() if b.isChecked()][0]
         self.last_folder = str(tparent)
         ui.title(tr("Export (%s) of %s", tr("Grandfather-Father-Son") if mode == "auto" else mode, src))
@@ -3559,7 +3735,7 @@ class MainWindow(QMainWindow):
             if self._gdrive_sets is None:
                 self._load_gdrive_sets()
             for name in self._gdrive_sets or []:
-                self.restore_set.addItem(tr("Google Drive: %s", gdrive_gfs.folder_name(name)),
+                self.restore_set.addItem(tr("Google Drive: %s", setfolders.shown(name) + gdrive_gfs.SUFFIX),
                                          gdrive_gfs.PREFIX + name)
         idx = self.restore_set.findData(cur) if cur else -1
         self.restore_set.setCurrentIndex(idx if idx >= 0 else 0)
@@ -3855,7 +4031,6 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self):
         self.cfg["adb_path"] = self.adb_custom
-        self.cfg["adb_wait_seconds"] = self.wait_spin.value()
         self.cfg["fsync"] = self.fsync_check.isChecked()
         self.cfg["keep_awake"] = self.awake_check.isChecked()
         self.cfg["update_check"] = self.update_check.isChecked()
@@ -3866,7 +4041,7 @@ class MainWindow(QMainWindow):
 
     def _tab_changed(self, idx):
         if idx == 0:
-            self._fill_import_targets()
+            self._refresh_backups()
             self.import_dest_list.rebuild()
         elif idx == 1:
             self._fill_export_sources()
@@ -3883,6 +4058,8 @@ class MainWindow(QMainWindow):
         self.import_dest_list.update_status()
         self._update_preview()
         self._update_home()
+        if self.pages.currentWidget() is self.more_page:
+            self._update_backup_hints()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

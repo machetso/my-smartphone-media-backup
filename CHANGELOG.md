@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.9.8.3] - unreleased
+
+### Phone app: new package name
+- **The phone app has a new Android package name (`io.github.machetso.mediabackup`) and version
+  0.8.0.** Android treats it as a new app: install it again (*Program settings → Versions and phone
+  app*), pair the phone again, and uninstall the old “My Media Backup” from the phone.
+
+### Direct Wi-Fi
+- *Possible connections* now shows Direct Wi-Fi as **in use** when the phone is connected over it
+  (before: always “not possible”, and *Use* could be clicked).
+- The *Direct Wi-Fi* window shows step by step what happens: Direct Wi-Fi on → the phone joins the
+  network → the phone app or Wireless debugging answers → connected – and what to tap on the phone
+  (e.g. “Allow wireless debugging on this network?”). The main window shows the same while waiting.
+
+### Privacy
+- *Versions and phone app* shows only the phone connected right now, never phones used before.
+- Examples in the manual, the changelog and the program use invented names only.
+
+### New month folders (user request 2026-11-09)
+- **Month folders are now named year + month: `2026/26.02` is February 2026.** Photos and videos
+  of a month are in the same folder (no more `02.February-photos` / `02.February-videos`). RAW
+  photos stay separate: `2026/raw/26.02`.
+- **You choose which old month folders keep their old name and structure.** Before the first
+  conversion of a backup the program lists its old month folders (by year, with the number of
+  files; several at once with Ctrl/Shift-click, *Select all* / *Select none*); unticked folders are
+  never changed – on any drive or on Google Drive. The choice is remembered per backup. Without a
+  choice nothing is converted (the terminal version asks with a numbered list). Your own folders,
+  "keep folder structure" folders and `other/` folders of old-phone imports are never touched.
+- **Existing backups are then converted automatically** before the next backup, import or export: on
+  every backup drive, in every Grandfather-Father-Son / second-storage export folder and on
+  Google Drive (Copy and Grandfather-Father-Son). Files are only moved (on a drive a rename,
+  on Google Drive the file keeps its id, so the shortcuts keep working) – nothing is copied again,
+  overwritten or deleted. The databases (index, catalog) get the new paths, so nothing is backed
+  up or uploaded twice. Emptied old folders are removed (on Google Drive: moved to the trash).
+- A restore of an older export also comes back in the new layout.
+- Reports count photos/videos by the file type instead of the folder name.
+
+### Back up an old drive like a phone (user request 2026-11-09)
+- The tab *Import old backup* is now **Old drive / old phone**: back up the photos and videos of an
+  old hard drive (or old phone) as a backup of its own – *New backup (old phone or old drive)* –
+  or add them to an existing backup.
+- For every folder you choose: **Sort into year/month folders** (like a phone backup) or **Keep
+  folder as it is** – copied 1:1 with its name and sub-folders to the top of the backup (e.g.
+  `Urlaub Italien 2019/Tag 1/`). Until now such folders went to `Year/other/pictures|movies/…`;
+  earlier imports stay where they are.
+- A kept folder is never renamed by the new month-folder conversion (also when it looks like an
+  old month folder, e.g. an old backup of this program kept 1:1).
+- Manual updated in English only so far; the other languages follow after testing.
+
 ## [0.9.8.2] - 2026-11-07
 
 ### Fixed

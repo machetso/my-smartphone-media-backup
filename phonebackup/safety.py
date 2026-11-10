@@ -14,7 +14,7 @@ _WIN_DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def safe_rel(rel):
-    """A relative path below a folder ('2026/01.January-photos/x.jpg') or None when it could
+    """A relative path below a folder ('2026/26.01/x.jpg') or None when it could
     leave that folder: absolute, drive letter, backslash, '..', empty or '.' parts, NUL."""
     if not isinstance(rel, str) or not rel or "\\" in rel or "\0" in rel or _WIN_DRIVE.match(rel):
         return None

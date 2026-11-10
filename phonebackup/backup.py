@@ -81,6 +81,8 @@ def _skip_text(source, default=N_("not photo/video")):
 
 
 def backup_parent_name(phone_name, owner):
+    """The backup's NAME in the settings ('Pixel 10 Pro - Sam'). Its folder is
+    setfolders.rel(): <Owner>/<Phone> (user request 2026-11-09)."""
     return safe_name(f"{phone_name} - {owner}")
 
 
@@ -230,10 +232,13 @@ def perform_backup(source, phone_name, owner, folders, dest_bases, cfg, interact
     # keep_structure: folders other than the camera folder keep their path (user request 2026-11-04)
     placement = keep_structure_placement(folders) if keep_structure else None
 
-    parent_name = parent_name or backup_parent_name(phone_name, owner)
-    from . import plans                       # backup plan per drive: simple or Grandfather-Father-Son
+    from . import migrate, plans, setfolders  # backup plan per drive: simple or Grandfather-Father-Son
+    parent_name = parent_name or setfolders.rel(phone_name, owner)       # 'Sam/Pixel 10 Pro'
     dests = []
     for i, base in enumerate(dest_bases, 1):
+        setfolders.relocate(base, cfg)                # old 'Phone - Owner' folders -> Owner/Phone
+        set_dir = Path(base) / parent_name            # old month folders -> 2026/26.02 (user's choice)
+        migrate.ensure_converted(set_dir, tr("Destination %d", i), migrate.effective_keep(cfg, set_dir))
         want = plans.plan_of(cfg, base)
         have = plans.folder_plan(Path(base) / parent_name)
         if have and have != want and mode != "import":

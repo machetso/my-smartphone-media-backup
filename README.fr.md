@@ -192,13 +192,18 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* Nom du dossier du mois = année + mois : `26.02` est février 2026. Les sauvegardes des versions
+  précédentes (`02.February-photos` / `02.February-videos`) sont converties avant la prochaine
+  sauvegarde ou exportation – le programme affiche d’abord les anciens dossiers de mois et vous
+  décochez ceux qui doivent **garder leur nom et leur structure** (ils ne sont jamais modifiés). Le
+  choix vaut pour chaque disque et pour Google Drive ; les fichiers sont seulement déplacés, jamais
+  supprimés. Vos propres dossiers ne sont jamais touchés.
 * Les dossiers d’année et de mois ne sont créés que lorsqu’un fichier y est placé - pas de dossiers vides.
 * Mois = date de prise de vue issue des métadonnées de la photo/vidéo → sinon le nom de fichier
   (`PXL_20261102_…`) → sinon la date du fichier.

@@ -92,23 +92,23 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(results), 6)
         self.assertTrue(all(r.ok for r in results), [r.per_dest for r in results])
 
-        parent1 = self.d1 / "Pixel 10 Pro - Sam Test"
-        parent2 = self.d2 / "Pixel 10 Pro - Sam Test"
+        parent1 = self.d1 / "Sam Test" / "Pixel 10 Pro"      # <Owner>/<Phone>
+        parent2 = self.d2 / "Sam Test" / "Pixel 10 Pro"
         exp = [
-            "2025/03.March-photos/IMG_0001.jpg",
-            f"{video_local.year}/{video_local.month:02d}.{media_month(video_local.month)}-videos/VID_A.mp4",
-            "2026/raw/01.January-raw/RAW_1.dng",
-            "2026/02.February-photos/Screenshot_20260210-101010.png",
-            "2026/11.November-photos/PXL_20261102_143000123.MP.jpg",
-            "2023/07.July-photos/noinfo.heic",
+            "2025/25.03/IMG_0001.jpg",
+            f"{video_local.year}/{video_local.year % 100:02d}.{video_local.month:02d}/VID_A.mp4",
+            "2026/raw/26.01/RAW_1.dng",
+            "2026/26.02/Screenshot_20260210-101010.png",
+            "2026/26.11/PXL_20261102_143000123.MP.jpg",
+            "2023/23.07/noinfo.heic",
         ]
         for rel in exp:
             for parent in (parent1, parent2):
                 self.assertTrue((parent / rel).is_file(), f"missing {parent / rel}")
                 self.assertEqual((parent / rel).read_bytes(), (self.cam / Path(rel).name).read_bytes())
         # only month folders that received files exist (no empty folders), no space after the dot
-        self.assertEqual(sorted(p.name for p in (parent1 / "2025").iterdir()), ["03.March-photos"])
-        self.assertFalse((parent1 / "2026" / "01.January-photos").exists())
+        self.assertEqual(sorted(p.name for p in (parent1 / "2025").iterdir()), ["25.03"])
+        self.assertFalse((parent1 / "2026" / "26.03").exists())
         empty = [p for p in parent1.rglob("*") if p.is_dir() and not any(p.iterdir())
                  and ".phonebackup" not in p.parts]
         self.assertEqual(empty, [])
@@ -139,7 +139,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(results), 3)
         st, loc = by_name["DCIM/Other/IMG_0001.jpg"].per_dest["Destination 1"]
         self.assertIn("renamed", st)
-        self.assertEqual(loc, "2025/03.March-photos/IMG_0001_1.jpg")
+        self.assertEqual(loc, "2025/25.03/IMG_0001_1.jpg")
         st, loc = by_name["DCIM/Camera/VID_A_copy.mp4"].per_dest["Destination 1"]
         self.assertTrue(st.startswith("DUPLICATE"), st)
 
@@ -163,7 +163,7 @@ class EndToEnd(unittest.TestCase):
         perform_export(parent1, exp_base, "incremental", CFG)
         st, _, _ = perform_export(parent1, exp_base, "differential", CFG)
         self.assertEqual(st, "COMPLETED")
-        tparent = exp_base / parent1.name
+        tparent = exp_base / "Sam Test" / parent1.name
         cat = Catalog(tparent)
         runs = cat.runs()
         diff_files = cat.files_of([runs[-1].id])
@@ -184,9 +184,6 @@ class EndToEnd(unittest.TestCase):
                 self.assertEqual((restore / rel).read_bytes(), p.read_bytes(), str(rel))
 
 
-def media_month(m):
-    from phonebackup.layout import MONTHS
-    return MONTHS[m - 1]
 
 
 class Units(unittest.TestCase):

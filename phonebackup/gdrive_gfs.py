@@ -6,7 +6,7 @@ Google Drive can be used in two ways (the user chooses per export):
 
 Layout on Google Drive (separate from the mirror, both can exist side by side):
   My Drive/My Smartphone Media Backup/<Phone - Owner> (Grandfather-Father-Son)/
-        2026-11-05_10-00-00_full/2026/01.January-photos/...
+        2026-11-05_10-00-00_full/2026/26.01/...
         2026-11-20_18-30-00_incremental/...
         .phonebackup-export/catalog.sqlite     (runs + files, the same catalog as on a HDD)
 
@@ -44,7 +44,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from . import gfs, ui
+from . import gfs, migrate, setfolders, ui
 from .copier import Cancelled, file_chunks
 from .export import EXPORT_DIR, Catalog, _category, scan_backup
 from .gdrive import (FOLDER_MIME, ROOT_NAME, STATUS_FULL, STATUS_SIGNIN_LOST, UPLOAD_WORKERS, Drive,
@@ -79,9 +79,10 @@ def folder_name(set_name):
 
 def local_dir(set_name) -> Path:
     from .adbdownload import data_dir
-    if safe_component(set_name) is None:          # a folder name from Google Drive: untrusted
+    phone, owner = setfolders.split_rel(set_name)
+    if safe_component(phone) is None or safe_component(owner) is None:   # from Google Drive: untrusted
         raise DriveError(tr("Unusable backup name on Google Drive: %s", repr(set_name)), "bad_name")
-    return Path(data_dir()) / "gdrive-gfs" / set_name
+    return Path(data_dir()) / "gdrive-gfs" / owner / phone
 
 
 def reports_dir(set_name) -> Path:
@@ -92,8 +93,9 @@ def reports_dir(set_name) -> Path:
 class DriveSet:
     """One phone's GFS folder on Google Drive + the local working copy of its catalog."""
 
-    def __init__(self, drive, set_name, create=True, write=True):
+    def __init__(self, drive, set_name, create=True, write=True, keep=None):
         self.drive, self.name = drive, set_name
+        self.keep = keep           # old month folders kept; None = do not convert (migrate.py)
         root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
         self.root = root
         self._locked = False
@@ -107,17 +109,24 @@ class DriveSet:
             raise
 
     def _open(self, drive, set_name, root, create):
+        """set_name: 'Owner/Phone' – the folder <root>/<Owner>/<Phone> (Grandfather-Father-Son)
+        (user request 2026-11-09; an old '<Phone - Owner> (…)' folder is moved there by a writer
+        and still read where it is otherwise)."""
         self.local = None
-        if create:
-            self.id = drive.find_or_create_folder(folder_name(set_name), root)
+        phone, owner = setfolders.split_rel(set_name)
+        if self._locked:
+            owner_id = setfolders.relocate_drive(drive, root, phone, owner, SUFFIX)
         else:
-            r = drive.call("GET", f"{API}/files", {
-                "q": f"name = {_q(folder_name(set_name))} and mimeType = '{FOLDER_MIME}' and "
-                     f"trashed = false and {_q(root)} in parents", "fields": "files(id)",
-                "spaces": "drive"})
-            if not r.get("files"):
-                raise NoGfsBackup(tr("No Grandfather-Father-Son backup of %s on Google Drive.", set_name))
-            self.id = r["files"][0]["id"]
+            owner_id = _find_folder(drive, root, owner)
+        fid = _find_folder(drive, owner_id, phone + SUFFIX) if owner_id else None
+        if fid is None and not self._locked:
+            fid = _find_folder(drive, root, setfolders.key(phone, owner) + SUFFIX)
+        if fid is None:
+            if not (create and self._locked):
+                raise NoGfsBackup(tr("No Grandfather-Father-Son backup of %s on Google Drive.",
+                                     setfolders.shown(set_name)))
+            fid = drive.find_or_create_folder(phone + SUFFIX, owner_id)
+        self.id = fid
         self.remote, self.folders = drive.list_tree(self.id)
         base = local_dir(set_name)
         _clean_old_work(base)
@@ -129,6 +138,12 @@ class DriveSet:
         if r:                                        # Google Drive's catalog is the reference
             drive.download(r["id"], cat_file, r["size"])
             _check_catalog(cat_file)
+        if self._locked and self.keep is not None:   # old month folders -> 2026/26.02
+            moved, kept = migrate.convert_drive_tree(drive, self.remote, self.folders, nested=True,
+                                                     keep=self.keep)
+            migrate.report_drive(moved, kept, tr("Google Drive (Grandfather-Father-Son)"))
+            if r and migrate.convert_catalog(cat_file, self.keep):
+                self.save_catalog()
 
     def catalog(self):
         return Catalog(self.local)
@@ -161,16 +176,25 @@ class DriveSet:
 
     def mirror_files(self):
         """Files of the Copy (mirror) of the same backup: rel -> {"id","size","sha256"}."""
-        r = self.drive.call("GET", f"{API}/files", {
-            "q": f"name = {_q(self.name)} and mimeType = '{FOLDER_MIME}' and trashed = false and "
-                 f"{_q(self.root)} in parents", "fields": "files(id)", "spaces": "drive"})
-        if not r.get("files"):
+        phone, owner = setfolders.split_rel(self.name)
+        owner_id = _find_folder(self.drive, self.root, owner)
+        mid = _find_folder(self.drive, owner_id, phone) if owner_id else None
+        if mid is None:                              # Copy not moved yet: its old place
+            mid = _find_folder(self.drive, self.root, setfolders.key(phone, owner))
+        if mid is None:
             return {}
-        return self.drive.list_tree(r["files"][0]["id"])[0]
+        files, folders = self.drive.list_tree(mid)
+        if self._locked and self.keep is not None:   # old month folders -> 2026/26.02
+            moved, kept = migrate.convert_drive_tree(self.drive, files, folders, keep=self.keep)
+            migrate.report_drive(moved, kept, tr("Google Drive (Copy)"))
+        return files
 
     def file_id(self, run_folder, rel):
         """Id of the STORED file behind run_folder/rel (a shortcut is followed)."""
         r = self.remote.get(f"{run_folder}/{rel}")
+        new = migrate.convert_rel(rel, self.keep or migrate.NO_KEEP)
+        if not r and new:                            # moved, the catalog not yet updated
+            r = self.remote.get(f"{run_folder}/{new}")
         if not r:
             return None
         return r.get("target") or r["id"]
@@ -224,14 +248,17 @@ def _clean_old_work(base):
         pass
 
 
-def list_sets(drive):
-    """Names ('Phone - Owner') of the GFS backups on Google Drive."""
-    root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
+def _find_folder(drive, parent, name):
     r = drive.call("GET", f"{API}/files", {
-        "q": f"mimeType = '{FOLDER_MIME}' and trashed = false and {_q(root)} in parents",
-        "fields": "files(name)", "spaces": "drive", "pageSize": 1000})
-    return sorted(n for n in (f["name"][:-len(SUFFIX)] for f in r.get("files", [])
-                              if f["name"].endswith(SUFFIX)) if safe_component(n))
+        "q": f"name = {_q(name)} and mimeType = '{FOLDER_MIME}' and trashed = false and "
+             f"{_q(parent)} in parents", "fields": "files(id)", "spaces": "drive"})
+    return r["files"][0]["id"] if r.get("files") else None
+
+
+def list_sets(drive):
+    """'Owner/Phone' of the GFS backups on Google Drive."""
+    root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
+    return setfolders.drive_sets(drive, root, SUFFIX)
 
 
 def runs_of(set_name, cfg, drive=None):
@@ -295,14 +322,16 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
     """Grandfather-Father-Son export of a backup folder to Google Drive.
     Returns (status, report paths, verdict)."""
     source_parent = Path(source_parent)
-    name = source_parent.name
+    name = setfolders.rel_of(source_parent)              # 'Sam/Pixel 10 Pro'
+    keep = migrate.effective_keep(cfg, source_parent)   # old month folders -> 2026/26.02 (the
+    migrate.ensure_converted(source_parent, keep=keep)  # same folders kept on Google Drive)
     drive = drive or Drive(cfg)
     started = datetime.now()
     t0 = time.monotonic()
     acct = drive.account()
     ui.info(tr("Google Drive: %s", acct["email"]))
     ui.info(tr("Reading the Grandfather-Father-Son backups on Google Drive …"))
-    ds = DriveSet(drive, name)
+    ds = DriveSet(drive, name, keep=keep)
     _sets.append(ds)
     cat = ds.catalog()
     chosen_by = None
@@ -567,8 +596,8 @@ def _perform_drive_gfs_export(_sets, source_parent, cfg, mode="auto", cancel=Non
     columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Path in backup"),
                tr("Status"), tr("SHA-256"), tr("How")]
     rdir = Path(report_dir) if report_dir else reports_dir(name)
-    base = unique_basename(rdir, f"Google Drive {mode} export {name}", started)
-    paths = write_reports(rdir, base, tr("Google Drive %s export %s - %s", tr(mode), name,
+    base = unique_basename(rdir, f"Google Drive {mode} export {setfolders.key_of_rel(name)}", started)
+    paths = write_reports(rdir, base, tr("Google Drive %s export %s - %s", tr(mode), setfolders.shown(name),
                                          f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections, columns, rows)
     try:                                         # the report also goes into the run folder
@@ -651,6 +680,7 @@ def _remove_runs(_sets, set_name, cfg, run_ids, keep=None, drive=None):
 def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, drive=None):
     """Download the state of one GFS export from Google Drive into a folder (verified)."""
     restore_dir = Path(restore_dir)
+    keep = migrate.decision(cfg, setfolders.key_of_rel(set_name)) or migrate.NO_KEEP   # new layout
     drive = drive or Drive(cfg)
     ds = DriveSet(drive, set_name, create=False)
     _sets.append(ds)
@@ -689,7 +719,7 @@ def _perform_restore(_sets, set_name, upto_id, restore_dir, cfg, cancel=None, dr
                     raise DriveError(tr("missing on Google Drive"), "missing")
                 got = drive.download(fid, part, sz, on_bytes=lambda b: prog.update(add_bytes=b),
                                      cancel=cancel)
-                final = inside(restore_dir, rel)
+                final = inside(restore_dir, migrate.convert_rel(rel, keep) or rel)   # new layout
                 if got != sha:
                     st = "ERROR: downloaded data differs (SHA-256 mismatch)"
                     part.unlink()

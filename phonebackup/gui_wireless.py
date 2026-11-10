@@ -313,9 +313,43 @@ class HotspotDialog(QDialog):
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
+        self.steps = _label("")              # live: what is happening now (user request 2026-11-10)
+        lay.insertWidget(lay.indexOf(self.status) + 1, self.steps)
         self.result_ready.connect(self._on_result)
         if not win:
             self._refresh()
+            self._steps_timer = QTimer(self)
+            self._steps_timer.timeout.connect(self._show_steps)
+            self._steps_timer.start(1000)
+
+    def _show_steps(self):
+        """The four steps with ✓ / … and what to do now – from the main window's background check."""
+        par = self.parent()
+        info = getattr(par, "_hotspot_info", None)
+        if not self.stop_btn.isEnabled() and info is None:
+            self.steps.setText("")
+            return
+        if info is None:
+            self.steps.setText(_status_html(tr("Checking whether the phone has joined …"), GRAY))
+            return
+        joined, answers, conn = bool(info["clients"]), info["app"] or info["adb"], info["connected"]
+
+        def step(done, text, now):
+            mark, col = ("✓", GREEN) if done else ("→", ORANGE) if now else ("○", GRAY)
+            return f"<div style='color:{col}'>{mark} {text}</div>"
+
+        rows = [step(True, html.escape(tr("Direct Wi-Fi is on")), False),
+                step(joined, html.escape(tr("The phone joins the network")
+                                         + (f" ({info['clients'][0]})" if joined else "")), not joined),
+                step(answers or conn, html.escape(tr("The phone app or Wireless debugging answers")),
+                     joined and not (answers or conn)),
+                step(conn, html.escape(tr("Connected – you can close this window and start the backup")),
+                     answers and not conn)]
+        msg = par.hotspot_progress_text() if hasattr(par, "hotspot_progress_text") else None
+        hint = ""
+        if msg and not conn:
+            hint = f"<br><span style='color:{msg[1]}'>" + html.escape(msg[0]).replace("\n", "<br>") + "</span>"
+        self.steps.setText("".join(rows) + hint)
 
     def _refresh(self):
         active = wireless.hotspot_active()
@@ -348,6 +382,9 @@ class HotspotDialog(QDialog):
         self._run(wireless.stop_hotspot, tr("Stopping direct Wi-Fi …"))
 
     def _on_result(self, ok, msg):
+        par = self.parent()
+        if hasattr(par, "_hotspot_next"):
+            par._hotspot_next = 0.0           # check at once whether the phone joins
         self._refresh()
         if not ok:
             self.status.setText(_status_html(tr("Did not work: %s", msg), RED))
@@ -362,16 +399,23 @@ class PhoneAppDialog(QDialog):
     claimed = Signal(object, str)        # entry or None, error
     pair_error = Signal(str)             # the key could not be handed to the phone
 
-    def __init__(self, parent, cfg):
+    def __init__(self, parent, cfg, first_run=False):
         super().__init__(parent)
         from . import companion
         self.companion = companion
         self.cfg = cfg
         self.paired = None
         self.req = None
-        self.setWindowTitle(tr("Set up phone app"))
-        self.resize(640, 640)
+        self.setWindowTitle(tr("Connect your phone") if first_run else tr("Set up phone app"))
+        self.resize(640, 680)
         lay = QVBoxLayout(self)
+        if first_run:          # the first connection ever (user request 2026-11-10): as easy as possible
+            lay.addWidget(_label("<span style='font-size:16px;font-weight:600'>"
+                                 + tr("Connect your phone") + "</span>"))
+            lay.addWidget(_label("<b>" + tr("Easiest – works with every phone:") + "</b> " + tr(
+                "plug the phone in with the USB cable, unlock it and choose “File transfer” on the phone. "
+                "The program connects by itself (slower, but nothing to install).") + "<br><br><b>"
+                + tr("Without a cable – phone app over Wi-Fi:") + "</b>"))
         lay.addWidget(_label(tr(
             "The phone app <b>My Media Backup</b> backs up without USB debugging or developer options. "
             "It may only <b>read photos and videos</b> – nothing else – and the connection is "
@@ -405,6 +449,18 @@ class PhoneAppDialog(QDialog):
         else:
             row.addWidget(_label(_status_html(tr("Could not start: %s", err), RED)))
         lay.addLayout(row)
+        vpn = _label(tr("The phone cannot open the page? Then it is not in the same Wi-Fi as this computer – or a VPN on "
+                 "the phone (e.g. Tailscale) sends it elsewhere: switch the VPN off for a moment, or allow "
+                 "“local network access” in the VPN app."))
+        vpn.setStyleSheet(f"color:{ORANGE}")
+        lay.addWidget(vpn)
+        bt_row = QHBoxLayout()
+        bt_row.addWidget(_label(tr("Phone not in the same Wi-Fi? Send the app over Bluetooth instead:")), 1)
+        bt = QPushButton(tr("Send the app over Bluetooth…"))
+        bt.setToolTip(tr("Last resort: only the app file goes over Bluetooth – never photos or videos."))
+        bt.clicked.connect(lambda: parent._install_app_bluetooth())
+        bt_row.addWidget(bt)
+        lay.addLayout(bt_row)
 
         self.code_box = QWidget()
         cl = QVBoxLayout(self.code_box)
@@ -494,4 +550,105 @@ class PhoneAppDialog(QDialog):
 
     def done(self, r):
         self.server.stop()
+        super().done(r)
+
+
+class ConnectPhoneDialog(QDialog):
+    """Connect a paired phone without a cable (user request 2026-11-10): a QR code to scan with the
+    phone's camera (opens or installs the phone app); Bluetooth only to send the app file.
+
+    found(entry, 'ip:port') when the phone answered the QR code; the main window connects it.
+    The dialog also closes by itself once the main window has a phone (`connected()` → True)."""
+    found = Signal(object)
+
+    def __init__(self, parent, cfg, connected):
+        super().__init__(parent)
+        from . import companion, wake
+        self.setWindowTitle(tr("Connect phone"))
+        self.cfg, self.connected = cfg, connected
+        self.server = None
+        lay = QVBoxLayout(self)
+        if not companion.phones(cfg):
+            lay.addWidget(_label(tr("No phone is paired with this computer yet. Set up the phone app "
+                                    "first – install it and pair it with this computer (or connect the "
+                                    "phone once with the USB cable).")))
+            setup = QPushButton(tr("Set up the phone app…"))
+            setup.clicked.connect(lambda: (self.reject(), PhoneAppDialog(parent, cfg).exec()))
+            lay.addWidget(setup, 0, Qt.AlignLeft)
+            bb = QDialogButtonBox(QDialogButtonBox.Close)
+            bb.rejected.connect(self.reject)
+            lay.addWidget(bb)
+            return
+        self.server = wake.ConnectServer(cfg, lambda e, a: self.found.emit((e, a))).start()
+        cable = _label("<b>" + tr("Easiest – USB cable:") + "</b> " + tr(
+            "plug the phone in, unlock it and choose “File transfer” on the phone – the program connects "
+            "by itself. Without a cable:"))
+        lay.addWidget(cable)
+        row = QHBoxLayout()
+        self.qr = QLabel()
+        self._show_qr()
+        row.addWidget(self.qr, 0, Qt.AlignTop)
+        right = QVBoxLayout()
+        right.addWidget(_label("<b>" + tr("1. Scan with the phone's camera") + "</b><br>" + tr(
+            "The phone app “My Media Backup” opens, switches backup mode on and connects to this computer "
+            "(same Wi-Fi). Needs the app version %s or newer on the phone.", "0.7.0") + "<br>" + tr(
+            "The phone says the app or the link is not found? Then the app is missing or too old: plug "
+            "the phone in with the USB cable, choose “File transfer” and use Program settings → “Install "
+            "/ update over USB cable…”.")))
+        right.addSpacing(10)
+        # Bluetooth ONLY to get the app onto the phone, as a last resort (user 2026-11-10)
+        right.addWidget(_label("<b>" + tr("2. The code does not work (no shared Wi-Fi)?") + "</b><br>"
+                               + tr("Send the phone app over Bluetooth, install it on the phone, then pair it.")))
+        self.bt_btn = QPushButton(tr("Send the app over Bluetooth…"))
+        self.bt_btn.setToolTip(tr("Last resort: only the app file goes over Bluetooth – never photos or videos."))
+        self.bt_btn.clicked.connect(lambda: parent._install_app_bluetooth())
+        right.addWidget(self.bt_btn, 0, Qt.AlignLeft)
+        self.status = _label("")
+        right.addWidget(self.status)
+        right.addStretch()
+        row.addLayout(right, 1)
+        lay.addLayout(row)
+        vpn = _label(tr("The phone cannot open the page? Then it is not in the same Wi-Fi as this computer – or a VPN on "
+                 "the phone (e.g. Tailscale) sends it elsewhere: switch the VPN off for a moment, or allow "
+                 "“local network access” in the VPN app."))
+        vpn.setStyleSheet(f"color:{ORANGE}")
+        lay.addWidget(vpn)
+        tip = _label(tr("Fastest is still the USB cable: the program switches to it by itself when the "
+                        "phone is plugged in."))
+        tip.setStyleSheet(f"color:{GRAY}")
+        lay.addWidget(tip)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.resize(720, 420)
+        self.found.connect(lambda _x: self._say(tr("The phone answered – connecting …"), GREEN))
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(1000)
+
+    def _show_qr(self):
+        # the app link itself, not a web page: Chrome on Android 17 may not reach the computer
+        # (local network permission), the phone app may (user test 2026-11-10)
+        pm = qr_pixmap(self.server.link(), scale=5)
+        if pm is not None:
+            self.qr.setPixmap(pm)
+        else:
+            self.qr.setText(tr("QR codes need the Python package <tt>segno</tt>."))
+
+    def _say(self, text, color=GRAY):
+        self.status.setText(_status_html(text, color))
+
+    def _tick(self):
+        if self.connected():
+            self.accept()
+            return
+        if time.time() > self.server.expiry - 10 and not self.server.used:   # a fresh code
+            from . import wake
+            self.server.stop()
+            self.server = wake.ConnectServer(self.cfg, lambda e, a: self.found.emit((e, a))).start()
+            self._show_qr()
+
+    def done(self, r):
+        if self.server:
+            self.server.stop()
         super().done(r)

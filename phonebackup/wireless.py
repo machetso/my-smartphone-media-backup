@@ -212,6 +212,32 @@ def remember(cfg, address, adb=None):
             pass
 
 
+def known_serials(cfg):
+    """Phones this computer may connect over Wireless debugging by itself: paired here with "Pair
+    over Wi-Fi…", connected here by USB cable, or already backed up here (serial in the backup's
+    phone.json). Fix 2026-11-10: the list was only filled by "Pair over Wi-Fi…" in this program,
+    so a phone paired before (or whose Wireless debugging the phone app switched on) was never used."""
+    known = list(cfg.get("wifi_serials", []))
+    try:
+        from .locations import find_backups
+        from .phoneid import load
+        for parent in find_backups(cfg):
+            for sn in load(parent).serials:
+                if sn and ":" not in sn and sn not in known:
+                    known.append(sn)
+    except Exception:  # noqa: BLE001 - drives not there: the saved list only
+        pass
+    return known
+
+
+def remember_serial(cfg, serial):
+    """A phone connected by USB cable (USB debugging) is a phone of this computer."""
+    from . import config
+    if serial and ":" not in serial and serial not in cfg.get("wifi_serials", []):
+        cfg["wifi_serials"] = list(cfg.get("wifi_serials", [])) + [serial]
+        config.save(cfg)
+
+
 def disconnect_all(adb):
     try:
         _run([adb, "disconnect"], timeout=10)
@@ -295,6 +321,59 @@ def hotspot_active():
     except (OSError, subprocess.SubprocessError):
         return False
     return code == 0 and HOTSPOT_CON in out.splitlines()
+
+
+def hotspot_networks():
+    """The IPv4 networks of the running Direct Wi-Fi (e.g. 10.42.0.0/24), [] when it is off."""
+    import ipaddress
+    if sys.platform.startswith("win") or not shutil.which("nmcli"):
+        return []
+    try:
+        code, out = _nmcli(["-g", "IP4.ADDRESS", "connection", "show", HOTSPOT_CON], timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    nets = []
+    if code == 0:
+        for part in out.replace("|", "\n").split():
+            try:
+                nets.append(ipaddress.ip_interface(part.strip()).network)
+            except ValueError:
+                pass
+    return nets
+
+
+def over_hotspot(address, networks):
+    """Does the phone address ('10.42.0.23:5555') lie in the Direct Wi-Fi network?"""
+    import ipaddress
+    host = (address or "").rpartition(":")[0].strip("[]") or (address or "")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in n for n in networks)
+
+
+def hotspot_clients(networks):
+    """IPv4 addresses of devices that joined the Direct Wi-Fi (from the computer's neighbour table)."""
+    import ipaddress
+    if not networks or not shutil.which("ip"):
+        return []
+    try:
+        r = subprocess.run(["ip", "-4", "neigh", "show"], capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for line in r.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if not parts or parts[-1] in ("FAILED", "INCOMPLETE") or "lladdr" not in parts:
+            continue
+        try:
+            ip = ipaddress.ip_address(parts[0])
+        except ValueError:
+            continue
+        if any(ip in n for n in networks) and parts[0] not in found:
+            found.append(parts[0])
+    return found
 
 
 def start_hotspot(ssid, password):

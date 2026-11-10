@@ -193,13 +193,18 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* Name des Monatsordners = Jahr + Monat: `26.02` ist Februar 2026. Backups älterer Versionen
+  (`02.February-photos` / `02.February-videos`) werden vor dem nächsten Backup oder Export
+  umgestellt – vorher zeigt das Programm die alten Monatsordner, und du entfernst den Haken bei
+  denen, die **ihren alten Namen und ihre Struktur behalten** sollen (sie werden nie geändert). Die
+  Wahl gilt für jedes Laufwerk und für Google Drive; Dateien werden nur verschoben, nie gelöscht.
+  Eigene Ordner und Ordner mit „Ordnerstruktur beibehalten“ werden nie angefasst.
 * Jahres- und Monatsordner werden nur angelegt, wenn eine Datei hineinkommt – keine leeren Ordner.
 * Monat = Aufnahmedatum aus den Foto-/Video-Metadaten → sonst der Dateiname
   (`PXL_20261102_…`) → sonst das Dateidatum.

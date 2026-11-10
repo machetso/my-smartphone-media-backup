@@ -17,7 +17,7 @@ class PhoneListTest(unittest.TestCase):
         os.makedirs(os.path.join(parent, ".phonebackup"))
         open(os.path.join(parent, ".phonebackup", "index.sqlite"), "w").close()
         with open(os.path.join(parent, "Backup Galaxy A55 Kim 2026-11-04.txt"), "w") as f:
-            f.write("  Smartphone       : SM-G780G\n  Owner            : Kim\n"
+            f.write("  Smartphone       : Galaxy A55\n  Owner            : Kim\n"
                     "  Status           : COMPLETED\n  Started          : 2026-11-04 20:56:52\n")
         self.cfg = {"destinations": [base]}
 
@@ -34,7 +34,7 @@ class PhoneListTest(unittest.TestCase):
             lastbackup.forget(self.cfg, ["Galaxy A55 - Kim"])
             lastbackup.discover(self.cfg)                       # stays hidden
             self.assertEqual([e["phone"] for e in lastbackup.phones(self.cfg)], ["Pixel 10 Pro"])
-            lastbackup.record(self.cfg, "SM-G780G", "Kim", [], [self.tmp.name], 1, 1, "COMPLETED")
+            lastbackup.record(self.cfg, "Galaxy A55", "Kim", [], [self.tmp.name], 1, 1, "COMPLETED")
             self.assertEqual(len(lastbackup.phones(self.cfg)), 2)   # backed up again: back
 
 

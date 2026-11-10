@@ -5,8 +5,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import APP_NAME, __version__, config, gfs, ui
-from .backup import backup_parent_name, perform_backup
+from . import APP_NAME, __version__, config, gfs, migrate, setfolders, ui
+from .backup import perform_backup
 from .export import MODES, Catalog, has_catalog, perform_export, perform_restore
 from .i18n import tr
 from .importer import perform_import
@@ -154,8 +154,9 @@ def backup_menu(cfg):
     ui.info("  " + tr("Owner:   %s", owner))
     ui.info("  " + tr("Folders: %s", ", ".join(folders)))
     for d in dests:
-        ui.info("  " + tr("To:      %s", Path(d) / backup_parent_name(phone, owner)))
-    if not ui.ask_yes_no(tr("Start the backup?"), True):
+        ui.info("  " + tr("To:      %s", Path(d) / setfolders.rel(phone, owner)))
+    if not ui.ask_yes_no(tr("Start the backup?"), True) or not migrate.ask_cli(
+            cfg, [Path(d) / setfolders.rel(phone, owner) for d in dests]):
         source.close()
         return
     status, paths, _, _ = _awake(cfg, "Backup", perform_backup, source, phone, owner, folders, dests, cfg)
@@ -181,7 +182,7 @@ def import_menu(cfg):
     ui.info(tr("Copies that will be updated:"))
     for p in sets[name]:
         ui.info(f"  {p}")
-    if not ui.ask_yes_no(tr("Start the import?"), True):
+    if not ui.ask_yes_no(tr("Start the import?"), True) or not migrate.ask_cli(cfg, sets[name]):
         return
     try:
         status, paths, _, _ = _awake(cfg, "Import", perform_import, src, sets[name], cfg)
@@ -209,7 +210,7 @@ def export_menu(cfg):
                    "this does not protect against a drive failure."))
         if not ui.ask_yes_no(tr("Continue anyway?"), False):
             return
-    tparent = Path(target) / Path(src).name
+    tparent = Path(target) / setfolders.rel_of(src)
     full = None
     if has_catalog(tparent):
         cat = Catalog(tparent)
@@ -227,7 +228,8 @@ def export_menu(cfg):
         mode = "full"
     else:
         mode = MODES[ui.choose(tr("Export type"), modes, default=3)]
-    if not ui.ask_yes_no(tr("Start the %s export of %s to %s?", gfs.mode_name(mode), src, tparent), True):
+    if not ui.ask_yes_no(tr("Start the %s export of %s to %s?", gfs.mode_name(mode), src, tparent),
+                         True) or not migrate.ask_cli(cfg, [src, tparent]):
         return
     try:
         status, paths, _ = _awake(cfg, "Export", perform_export, src, target, mode, cfg)

@@ -86,8 +86,9 @@ def discover(cfg):
     if get({"last_backup": lb}) and _key(lb) not in hidden:
         known.setdefault(_key(lb), lb)
     changed = False
+    from .setfolders import key_of
     for parent in find_backups(cfg):
-        key = os.path.basename(parent)
+        key = key_of(parent)
         if key in known or key in hidden:
             continue
         reports = sorted(glob.glob(os.path.join(glob.escape(parent), "Backup *.txt")),

@@ -11,7 +11,7 @@ from unittest import mock
 from phonebackup import gdrive, gdrive_gfs, gfs
 from tests.test_gdrive import FakeDrive, make_backup
 
-SET = "Pixel 10 Pro - Sam"
+SET = "Sam/Pixel 10 Pro"                     # <Owner>/<Phone>
 
 
 class DriveGfsTest(unittest.TestCase):
@@ -63,12 +63,12 @@ class DriveGfsTest(unittest.TestCase):
             self.assertEqual(on[f"{top}/{r1.folder}/{rel}"], data)
         self.assertIn(f"{top}/.phonebackup-export/catalog.sqlite", on)
 
-        self.add("2026/02.February-photos/X.jpg", b"x" * 50)
+        self.add("2026/26.02/X.jpg", b"x" * 50)
         self.assertEqual(self.export("incremental"), (1, 0))        # only X uploaded
         state_after_x = backup_files()
         r2 = self.runs()[-1]
 
-        self.add("2026/03.March-photos/Y.jpg", b"y" * 70)
+        self.add("2026/26.03/Y.jpg", b"y" * 70)
         self.assertEqual(self.export("differential"), (1, 1))       # Y uploaded, X linked
         r3 = self.runs()[-1]
         state_after_y = backup_files()
@@ -105,7 +105,7 @@ class DriveGfsTest(unittest.TestCase):
         gdrive.perform_drive_export(self.parent, {}, drive=self.drive,
                                     report_dir=Path(self.tmp.name) / "r2")
         # one file changed in the backup after the Copy: that one must be uploaded
-        self.add("2026/01.January-photos/PXL_1.jpg", b"changed" * 10)
+        self.add("2026/26.01/PXL_1.jpg", b"changed" * 10)
         self.assertEqual(self.export("full"), (1, 2))       # 2 linked to the Copy, 1 uploaded
         r = self.runs()[-1]
         self.assertEqual(self.restore(r.id), self.data)
@@ -118,7 +118,7 @@ class DriveGfsTest(unittest.TestCase):
                                                 report_dir=Path(self.tmp.name) / "r0")
         self.assertEqual(gdrive_gfs.list_sets(self.drive), [SET])
         self.assertEqual(self.runs(), [])                      # nothing recorded
-        self.add("2026/02.February-photos/new.jpg", b"n" * 40)
+        self.add("2026/26.02/new.jpg", b"n" * 40)
         self.assertEqual(self.export("full")[0], 1)            # only the new photo uploaded
         self.assertEqual(self.fake.moves, 3)                   # the 3 earlier ones reused
         top = f"{gdrive.ROOT_NAME}/{SET}{gdrive_gfs.SUFFIX}/"
@@ -145,7 +145,7 @@ class DriveGfsTest(unittest.TestCase):
                                     report_dir=Path(self.tmp.name) / "r2")
         self.assertEqual(gdrive_gfs.list_sets(self.drive), [SET])
         on = self.fake.paths()
-        self.assertIn(f"{gdrive.ROOT_NAME}/{SET}/2026/01.January-photos/PXL_1.jpg", on)
+        self.assertIn(f"{gdrive.ROOT_NAME}/{SET}/2026/26.01/PXL_1.jpg", on)
 
 
 if __name__ == "__main__":

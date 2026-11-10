@@ -59,8 +59,8 @@ class GermanReport(unittest.TestCase):
         # shown in the chosen language
         self.assertTrue(shown(verdict).startswith("ALLES RICHTIG KOPIERT - 1 neue Datei"), shown(verdict))
         # folder and report file names stay English
-        self.assertEqual(loc, "2025/01.January-photos/IMG_A.jpg")
-        set_dir = hdd / "Pixel - Sam"
+        self.assertEqual(loc, "2025/25.01/IMG_A.jpg")
+        set_dir = hdd / "Sam" / "Pixel"
         self.assertTrue((set_dir / loc).is_file())
         names = {q.name for q in paths}
         self.assertIn(f"Backup Pixel Sam {datetime.now():%Y-%m-%d}.txt", names)

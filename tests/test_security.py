@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+from phonebackup import setfolders
 from pathlib import Path
 from unittest import mock
 
@@ -21,7 +23,7 @@ from tests.test_gdrive import FakeDrive, make_backup
 
 class SafetyHelpersTest(unittest.TestCase):
     def test_safe_rel(self):
-        for good in ("a.jpg", "2026/01.January-photos/x.jpg", "a b/ü.jpg"):
+        for good in ("a.jpg", "2026/26.01/x.jpg", "a b/ü.jpg"):
             self.assertEqual(safety.safe_rel(good), good)
         for bad in ("", "/etc/passwd", "../x", "a/../../x", "a//b", "./a", "a\\b", "C:/x", "c:x",
                     "a\0b", None, 5):
@@ -61,15 +63,15 @@ class TamperedCatalogTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.src = self.tmp / "backup" / "Pixel - Sam"
-        f = self.src / "2026" / "01.January-photos" / "a.jpg"
+        self.src = self.tmp / "backup" / "Sam" / "Pixel"
+        f = self.src / "2026" / "26.01" / "a.jpg"
         f.parent.mkdir(parents=True)
         f.write_bytes(b"photo")
         self.target = self.tmp / "second"
         self.target.mkdir()
         status, _, _ = export.perform_export(self.src, self.target, "full", {"fsync": False})
         self.assertEqual(status, "COMPLETED")
-        self.parent = self.target / self.src.name
+        self.parent = self.target / "Sam" / self.src.name
         self.db = self.parent / EXPORT_DIR / "catalog.sqlite"
 
     def tearDown(self):
@@ -155,7 +157,7 @@ class DriveTamperTest(unittest.TestCase):
     def test_restore_refuses_paths_outside(self):
         self.tamper("UPDATE files SET rel='../../escaped.jpg' WHERE rowid=(SELECT MIN(rowid) FROM files)")
         out = self.base / "restore"
-        status, _, verdict = gdrive_gfs.perform_restore(self.parent.name, 1, out, {}, drive=self.drive)
+        status, _, verdict = gdrive_gfs.perform_restore(setfolders.rel_of(self.parent), 1, out, {}, drive=self.drive)
         self.assertFalse((self.base / "escaped.jpg").exists())
         self.assertFalse(any(self.base.glob("**/escaped.jpg")))
         self.assertTrue(verdict.startswith("ATTENTION"), verdict)
@@ -163,16 +165,16 @@ class DriveTamperTest(unittest.TestCase):
     def test_catalog_with_trigger_is_refused(self):
         self.tamper("CREATE TRIGGER t AFTER INSERT ON runs BEGIN DELETE FROM files; END")
         with self.assertRaises(gdrive.DriveError):
-            gdrive_gfs.runs_of(self.parent.name, {}, drive=self.drive)
+            gdrive_gfs.runs_of(setfolders.rel_of(self.parent), {}, drive=self.drive)
 
 
 
 class DriveFolderNameTest(unittest.TestCase):
     def test_folder_names_from_drive_cannot_leave_the_data_folder(self):
-        for bad in ("../../x", "a/b", ".hidden", ""):
+        for bad in ("../../x", "a/../..", ".hidden", "", "Sam/.x", "../Pixel"):
             with self.assertRaises(gdrive.DriveError):
                 gdrive_gfs.local_dir(bad)
-        self.assertTrue(str(gdrive_gfs.local_dir("Pixel - Sam")).endswith("Pixel - Sam"))
+        self.assertEqual(gdrive_gfs.local_dir("Sam/Pixel").parts[-2:], ("Sam", "Pixel"))
 
 
 class CraftedMediaTest(unittest.TestCase):

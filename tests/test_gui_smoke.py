@@ -13,9 +13,20 @@ except ImportError:
     HAVE_QT = False
 
 
+def setUpModule():
+    # the window's background phone search (adb, mDNS, Bluetooth) must not run in tests: it would
+    # outlive the closed test window (crash at exit) and could talk to a real phone
+    if HAVE_QT:
+        from phonebackup import gui
+        p = mock.patch.object(gui.MainWindow, "_adb_poller", lambda self: None)
+        p.start()
+        unittest.addModuleCleanup(p.stop)
+
+
 class GuiSmokeTest(unittest.TestCase):
     def test_every_used_method_exists(self):
-        s = (Path(__file__).resolve().parent.parent / "phonebackup" / "gui.py").read_text(encoding="utf-8")
+        pkg = Path(__file__).resolve().parent.parent / "phonebackup"
+        s = "\n".join((pkg / f).read_text(encoding="utf-8") for f in ("gui.py", "gui_backups.py"))
         defs = set(re.findall(r"^\s+def (\w+)", s, re.M)) | set(re.findall(r"self\.(\w+)\s*=", s))
         missing = sorted(u for u in set(re.findall(r"self\.(_\w+)\b", s)) if u not in defs)
         self.assertEqual(missing, [])
@@ -31,7 +42,7 @@ class GuiSmokeTest(unittest.TestCase):
             with mock.patch.object(gui, "find_adb", lambda cfg: None):
                 w = gui.MainWindow()
                 try:
-                    for page in (w.backup_page, w.more_page, w.home_page):
+                    for page in (w.backup_page, w.more_page, w.settings_page, w.home_page):
                         w.pages.setCurrentWidget(page)
                         app.processEvents()
                     self.assertIs(w.pages.currentWidget(), w.home_page)
@@ -65,9 +76,13 @@ class GuiSmokeTest(unittest.TestCase):
                     self.assertEqual([a.data() for a in w._lang_actions.actions() if a.isChecked()], ["de"])
                     self.assertIn("# My Smartphone Media Backup", gui.manual_text("de"))
                     w._show_manual()
+                    w._connect_phone_dialog()
+                    w._choose_connection()         # opens at once (no waiting for the check)
+                    w._open_manage_backups()
                     w._open_program_settings()
-                    self.assertIs(w.pages.currentWidget(), w.more_page)
-                    self.assertEqual(w.tabs.tabText(w.tabs.currentIndex()), "Settings")
+                    self.assertIs(w.pages.currentWidget(), w.settings_page)
+                    self.assertEqual([w.tabs.tabText(i) for i in range(w.tabs.count())],
+                                     ["Backups", "Backup backups", "Restore"])
                 finally:
                     i18n.use("en")
                     w._stop.set()

@@ -53,35 +53,23 @@ def is_backup_folder(path):
 
 
 def find_backups(cfg):
-    """Backup parent folders ('Phone - Owner') inside the saved destination folders."""
+    """Backup folders (<Owner>/<Phone>) inside the saved destination folders."""
+    from .setfolders import find_sets
     out = []
     for base in cfg.get("destinations", []):
-        if not os.path.isdir(base):
-            continue
-        try:
-            entries = sorted(os.scandir(base), key=lambda e: e.name)
-        except OSError:
-            continue
-        for e in entries:
-            if e.is_dir() and is_backup_folder(e.path):
-                out.append(e.path)
+        if os.path.isdir(base):
+            out += find_sets(base, cfg)
     return out
 
 
 def find_export_sets(cfg):
-    """Export sets ('Phone - Owner' with a catalog) inside the saved export targets - and
+    """Export sets (<Owner>/<Phone> with a catalog) inside the saved export targets - and
     Grandfather-Father-Son backups on the backup drives (same layout)."""
+    from .setfolders import find_sets
     out = []
     for base in list(cfg.get("export_targets", [])) + list(cfg.get("destinations", [])):
-        if not os.path.isdir(base):
-            continue
-        try:
-            entries = sorted(os.scandir(base), key=lambda e: e.name)
-        except OSError:
-            continue
-        for e in entries:
-            if e.is_dir() and has_catalog(e.path) and e.path not in out:
-                out.append(e.path)
+        if os.path.isdir(base):
+            out += [p for p in find_sets(base, cfg, export=True) if p not in out]
     return out
 
 

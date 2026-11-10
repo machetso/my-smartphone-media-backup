@@ -76,7 +76,7 @@ class EndToEndTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
-        self.src = base / "backup" / "Pixel - Sam"
+        self.src = base / "backup" / "Sam" / "Pixel"
         self.target = base / "second"
         self.target.mkdir()
         self.n = 0
@@ -87,14 +87,14 @@ class EndToEndTest(unittest.TestCase):
 
     def add_file(self):
         self.n += 1
-        p = self.src / "2026" / "01.January-photos" / f"IMG_{self.n}.jpg"
+        p = self.src / "2026" / "26.01" / f"IMG_{self.n}.jpg"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(f"photo {self.n}".encode() * 10)
 
     def export(self, when):
         status, _, _ = perform_export(self.src, self.target, "auto", self.cfg, now=d(when))
         self.assertEqual(status, "COMPLETED")
-        db = sqlite3.connect(str(self.target / self.src.name / EXPORT_DIR / "catalog.sqlite"))
+        db = sqlite3.connect(str(self.target / "Sam" / self.src.name / EXPORT_DIR / "catalog.sqlite"))
         db.execute("UPDATE runs SET started=? WHERE id=(SELECT MAX(id) FROM runs)", (when,))
         db.commit()
         db.close()
@@ -110,10 +110,10 @@ class EndToEndTest(unittest.TestCase):
         for when in dates:
             self.add_file()
             self.export(when + " 10:00:00")
-            cat = Catalog(self.target / self.src.name)
+            cat = Catalog(self.target / "Sam" / self.src.name)
             states[cat.runs()[-1].id] = self.state_files()
             cat.close()
-        parent = self.target / self.src.name
+        parent = self.target / "Sam" / self.src.name
         cat = Catalog(parent)
         types = [r.type for r in cat.runs()]
         cat.close()
@@ -159,7 +159,7 @@ class EndToEndTest(unittest.TestCase):
         self.export("2025-01-01 10:00:00")
         self.add_file()
         self.export("2025-01-02 10:00:00")
-        parent = self.target / self.src.name
+        parent = self.target / "Sam" / self.src.name
         removed, problems = remove_runs(parent, [1, 2])
         self.assertEqual(removed, [])
         self.assertEqual(len(problems), 2)

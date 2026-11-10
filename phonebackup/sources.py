@@ -405,7 +405,8 @@ def connect_adb(cfg):
     except (OSError, subprocess.SubprocessError):
         no_phone = False
     if no_phone:
-        addr = auto_connect(adb, cfg.get("wifi_last_address", ""), cfg.get("wifi_serials", []))
+        from .wireless import known_serials
+        addr = auto_connect(adb, cfg.get("wifi_last_address", ""), known_serials(cfg))
         if addr:
             ui.info("  " + tr("Phone found over Wi-Fi (%s).", addr))
             remember(cfg, addr, adb)
@@ -472,6 +473,13 @@ class FolderSource:
         self.key_prefix = key_prefix
         self.supports_phone_hash = verify_source      # hash every source file separately
         self.exclude_dirs = {d.lower() for d in exclude_dirs}
+
+    def put_file(self, local, rel_dir, name):
+        """Copy ONE file onto the phone (only used for the phone app into Download/, asked first)."""
+        target = self.root / rel_dir
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(local, target / name)
+        return str(PurePosixPath(rel_dir) / name)
 
     def list_subfolders(self, rel):
         base = self.root / rel
@@ -555,13 +563,18 @@ def find_gvfs_mtp():
         return found
 
     found = scan()
+    mounted = base.is_dir() and any(base.glob("mtp:*"))
+    if not found and mounted:
+        # connected in "File transfer", but no storage visible: the phone is locked (Android shows
+        # the storage only when unlocked) – say so at once instead of waiting a minute
+        return None, tr("unlock the phone – its storage is shown only while it is unlocked")
     if not found and shutil.which("gio"):
         try:
             out = _run(["gio", "mount", "-li"], timeout=20).stdout.decode("utf-8", "replace")
             for uri in sorted(set(re.findall(r"activation_root=(mtp://\S+)", out))):
                 ui.info("  " + tr("Mounting %s via MTP (can take a while) ...", uri))
                 _run(["gio", "mount", uri], timeout=120)
-            for _ in range(60):
+            for _ in range(15):
                 found = scan()
                 if found:
                     break
@@ -652,6 +665,25 @@ class WindowsMtpSource:
     def phone_hashes(self, rels):
         return {}
 
+    def put_file(self, local, rel_dir, name):
+        """Copy ONE file onto the phone through Explorer (the phone app into Download/)."""
+        folder = self._folder(rel_dir)
+        if folder is None:
+            raise RuntimeError(tr("folder %s not found on the phone", rel_dir))
+        with tempfile.TemporaryDirectory() as d:
+            named = Path(d) / name
+            shutil.copyfile(local, named)
+            folder.CopyHere(str(named), 4 | 16 | 512 | 1024)
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:          # CopyHere returns before it is done
+                if any(self._fname(it) == name and int(it.Size) == named.stat().st_size
+                       for it in folder.Items()):
+                    break
+                time.sleep(0.5)
+            else:
+                raise TimeoutError(tr("copy to phone timed out: %s", name))
+        return f"{rel_dir}/{name}"
+
     def open_stream(self, sf):
         if not self.staging:
             raise RuntimeError(tr("staging folder not set"))
@@ -715,6 +747,11 @@ def find_windows_mtp():
         return None, tr("Windows MTP error: %s", e)
     return None, tr("no phone found via MTP - unlock the phone and choose "
                     "'File transfer' in the USB notification")
+
+
+def find_mtp():
+    """The phone over the USB cable in "File transfer" mode: (source, None) or (None, reason)."""
+    return find_windows_mtp() if sys.platform.startswith("win") else find_gvfs_mtp()
 
 
 # =========================================================================== entry

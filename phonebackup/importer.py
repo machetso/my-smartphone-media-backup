@@ -1,6 +1,7 @@
-"""Import old backups or old phones (one or more folders) into a backup.
+"""Import old backups, old phones or folders of an old drive (one or more folders) into a backup.
 
-Files are sorted into the same Year/MM.Month-photos|videos / raw structure, every file is
+Files are sorted into the same Year/YY.MM / raw/YY.MM structure (or, for folders the user keeps,
+copied 1:1 with their folder path to the top of the backup), every file is
 hashed at the source and after writing, identical files are stored only once (also against
 everything already in the backup), and the source folder is only read - never changed.
 """
@@ -11,10 +12,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .backup import backup_parent_name, perform_backup
+from .backup import perform_backup
+from . import setfolders
 from .copier import file_chunks, sha256_file
 from .i18n import N_, tr
-from .layout import OTHER_KIND, other_dir, relative_dir
+from .layout import OTHER_KIND, keep_dir, relative_dir
 from .media import category_for
 from .sources import IMPORT_EXCLUDES, FolderSource, SourceFile, _dedupe
 
@@ -26,7 +28,7 @@ def check_import(source_root, backup_parents):
         raise ValueError(tr("The folder to import does not exist:\n%s", src))
     if not backup_parents:
         raise ValueError(tr("Choose at least one copy of the backup to import into."))
-    names = {Path(p).name for p in backup_parents}
+    names = {setfolders.rel_of(p) for p in backup_parents}
     if len(names) != 1:
         raise ValueError(tr("All chosen copies must belong to the same backup."))
     for p in backup_parents:
@@ -46,9 +48,10 @@ def perform_import(source_root, backup_parents, cfg, interactive=True, cancel=No
     src = FolderSource(root, kind="Folder import", device_name=root.name, description=str(root),
                        key_prefix=f"import:{root.as_posix()}/", verify_source=True,
                        exclude_dirs=IMPORT_EXCLUDES)
-    return perform_backup(src, None, None, [""], [p.parent for p in parents], cfg,
-                          interactive=interactive, cancel=cancel, parent_name=parents[0].name,
-                          mode="import", source_label=root.name)
+    return perform_backup(src, None, None, [""], [p.parent.parent for p in parents], cfg,
+                          interactive=interactive, cancel=cancel,
+                          parent_name=setfolders.rel_of(parents[0]), mode="import",
+                          source_label=root.name)
 
 
 # =========================================================================== old phone / several folders
@@ -57,7 +60,8 @@ def perform_import(source_root, backup_parents, cfg, interactive=True, cancel=No
 # SD card). Every folder that directly contains files is listed with its counts; each listed
 # folder is imported with its own files only (sub-folders are listed separately), so the user
 # decides exactly which folders count. Camera folders are sorted into the normal year/month
-# folders, everything else keeps its original folder under <year>/other/pictures|movies|other-files.
+# folders; the others are KEPT AS THEY ARE: their folder path 1:1 at the top of the backup
+# (user request 2026-11-09 – until then they went to <year>/other/pictures|movies|other-files).
 
 
 CAMERA, OTHER = "camera", "other"
@@ -238,9 +242,14 @@ class SelectionSource:
         return "other-video" if cat == "video" else "other-photo"
 
     def placement(self, sf, taken, cat):
-        if cat in OTHER_KIND:
-            return other_dir(taken, cat, self._info.get(sf.rel, (OTHER, "", False))[1])
+        if cat in OTHER_KIND:               # kept folder (and other files): its path 1:1
+            return keep_dir(self._info.get(sf.rel, (OTHER, "", False))[1])
         return relative_dir(taken, cat)
+
+    def kept_dirs(self):
+        """Folders (relative to the backup) that kept folders are copied to."""
+        return [keep_dir(root.name if rel == "." else rel).as_posix()
+                for root, rel, kind in self.items if kind == OTHER]
 
     def phone_hashes(self, rels):
         out = {}
@@ -286,9 +295,10 @@ def perform_old_phone_import(selections, phone_name, owner, dest_bases, cfg, oth
     phone_name, owner = phone_name.strip(), owner.strip()
     if not phone_name or not owner:
         raise ValueError(tr("Enter the name of the old phone and the owner."))
-    parent_name = backup_parent_name(phone_name, owner)
+    parent_name = setfolders.rel(phone_name, owner)          # 'Sam/Galaxy S7'
     check_selection(selections, [Path(b) / parent_name for b in dest_bases])
     src = SelectionSource(selections, device_name=phone_name, other_files=other_files)
+    _protect_kept(cfg, setfolders.key(phone_name, owner), src)
     return perform_backup(src, phone_name, owner, [""], [Path(b) for b in dest_bases], cfg,
                           interactive=interactive, cancel=cancel, parent_name=parent_name,
                           mode="import", source_label=f"{phone_name} {owner}")
@@ -298,15 +308,25 @@ def perform_selection_import(selections, backup_parents, cfg, other_files=False,
                              interactive=True, cancel=None):
     """Import the chosen folders into an existing backup (all ticked copies of it)."""
     check_selection(selections, backup_parents)
-    names = {Path(p).name for p in backup_parents}
+    names = {setfolders.rel_of(p) for p in backup_parents}
     if len(names) != 1:
         raise ValueError(tr("All chosen copies must belong to the same backup."))
     src = SelectionSource(selections, other_files=other_files)
+    _protect_kept(cfg, setfolders.key_of(backup_parents[0]), src)
     label = src.roots[0].name if len(src.roots) == 1 else f"{len(src.roots)} folders"   # report file name: English
     parents = [Path(p) for p in backup_parents]
-    return perform_backup(src, None, None, [""], [p.parent for p in parents], cfg,
-                          interactive=interactive, cancel=cancel, parent_name=parents[0].name,
-                          mode="import", source_label=label)
+    return perform_backup(src, None, None, [""], [p.parent.parent for p in parents], cfg,
+                          interactive=interactive, cancel=cancel,
+                          parent_name=setfolders.rel_of(parents[0]), mode="import", source_label=label)
+
+
+def _protect_kept(cfg, set_name, src):
+    """A kept folder whose path looks like an old month folder (e.g. an old backup of this
+    program, '2019/07.July-photos') must never be renamed by the month-folder conversion."""
+    from . import migrate
+    old = [d for d in src.kept_dirs() if migrate.is_old_dir(d) and migrate.old_dir_of(d + "/x") == d]
+    if old:
+        migrate.protect(cfg, set_name, old)
 
 
 # =========================================================================== correct an earlier import
@@ -330,8 +350,10 @@ def resort_camera_files(parent, dry_run=False, cancel=None, camera_names_only=Tr
 
     parent = Path(parent)
     db = sqlite3.connect(str(parent / INTERNAL_DIR / "index.sqlite"))
+    # only the old <year>/other/ folders – never folders the user chose to keep as they are
     rows = db.execute("SELECT rel_path, MAX(taken), MAX(size) FROM files "
                       "WHERE category IN ('other-photo', 'other-video') GROUP BY rel_path").fetchall()
+    rows = [r for r in rows if re.match(r"^\d{4}/other/", r[0])]
     moves = []
     try:
         last_commit = time.monotonic()

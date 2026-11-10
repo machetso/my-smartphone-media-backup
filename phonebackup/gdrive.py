@@ -1,7 +1,7 @@
 """Google Drive as second storage: MIRROR of a backup (user decision 2026-11-05).
 
 Layout on Google Drive (same as on the HDD):
-  My Drive/My Smartphone Media Backup/<Phone - Owner>/2026/01.January-photos/...
+  My Drive/My Smartphone Media Backup/<Owner>/<Phone>/2026/26.01/...
                                                        /Google Drive export reports/...
 
 - Each export uploads only files that are not on Google Drive yet. Nothing on Google Drive is
@@ -497,6 +497,10 @@ class Drive:
         self.call("PATCH", f"{API}/files/{file_id}",
                   {"addParents": to_parent, "removeParents": from_parent, "fields": "id"}, body={})
 
+    def trash(self, file_id):
+        """Move into the Google Drive trash (can be restored there for 30 days)."""
+        self.call("PATCH", f"{API}/files/{file_id}", {"fields": "id"}, body={"trashed": True})
+
     def delete(self, file_id):
         """Delete permanently (a folder with everything in it). Only for files this app made."""
         self.call("DELETE", f"{API}/files/{file_id}", ok=(200, 204, 404))
@@ -619,17 +623,27 @@ def perform_drive_export(source_parent, cfg, cancel=None, drive=None, report_dir
 
 
 def _perform_drive_export(source_parent, cfg, cancel, drive, report_dir):
+    from . import setfolders
     source_parent = Path(source_parent)
-    name = source_parent.name
+    phone, owner = source_parent.name, source_parent.parent.name
+    name = setfolders.key(phone, owner)                 # report name 'Pixel 10 Pro - Sam'
     started = datetime.now()
     t0 = time.monotonic()
 
     acct = drive.account()
     ui.info(tr("Google Drive: %s", acct["email"]))
     root = drive.find_or_create_folder(ROOT_NAME, None, app_key="root")
-    set_id = drive.find_or_create_folder(name, root)
+    # <root>/<Owner>/<Phone> (user request 2026-11-09) – an old '<Phone - Owner>' folder is moved
+    owner_id = setfolders.relocate_drive(drive, root, phone, owner)
+    set_id = drive.find_or_create_folder(phone, owner_id)
     ui.info(tr("Reading what is already on Google Drive …"))
     remote, folders = drive.list_tree(set_id)
+    from . import migrate                       # old month folders -> 2026/26.02 (both sides,
+    keep = migrate.effective_keep(cfg, source_parent)      # the same folders kept)
+    if keep is not None:
+        moved, kept = migrate.convert_drive_tree(drive, remote, folders, keep=keep)
+        migrate.report_drive(moved, kept, tr("Google Drive (Copy)"))
+    migrate.ensure_converted(source_parent, keep=keep)
     ui.info(tr("Scanning the backup folder …"))
     current = scan_backup(source_parent)
     known = open_readonly_lookup(source_parent)
@@ -759,7 +773,7 @@ def _perform_drive_export(source_parent, cfg, cancel, drive, report_dir):
     ]
     columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Path in backup"),
                tr("Status"), tr("SHA-256")]
-    rdir = Path(report_dir) if report_dir else reports_dir(name)
+    rdir = Path(report_dir) if report_dir else reports_dir(setfolders.rel(phone, owner))
     base = unique_basename(rdir, f"Google Drive export {name}", started)
     paths = write_reports(rdir, base, tr("Google Drive export %s - %s", name,
                                          f"{started:%Y-%m-%d %H:%M}"),

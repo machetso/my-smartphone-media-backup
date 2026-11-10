@@ -187,13 +187,15 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* jar qawHaq pong = DIS + jar: `26.02` 'oH jar cha' DIS 2026. qawHaq ngo' (`02.February-photos` /
+  `02.February-videos`) moj – wa'DIch qawHaq ngo' 'ang ghun, qawHaq **pong ngo' ratlhbogh**
+  DangaQHa'moH (not choH). Hoch Daq, Google Drive Daq je; ghItlh lalDan vIHmoH neH, Qaw'be'.
 * ghItlh 'elDI' neH DIS jar je 'aplo'mey chenmoHlu' - 'aplo' chIm pagh.
 * jar = mIllogh/HaSta metadata mIllogh jaj → pagh ghItlh pong
   (`PXL_20261102_…`) → pagh ghItlh jaj.

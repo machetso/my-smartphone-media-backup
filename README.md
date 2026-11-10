@@ -134,21 +134,29 @@ fastest, how to make it faster (cable + USB debugging; USB 3 cable instead of US
 
 **Manage backups…** has four tabs:
 
-* **Import old backup** – two ways:
+* **Old drive / old phone** – back up the photos and videos of an old hard drive or an old
+  phone like a phone backup. Two ways:
   * *Add to an existing backup* – adds old backups or any folders (mixed photos, videos, RAW,
-    nested folders, duplicates) to one of your backups, sorted into the same year/month folders.
-  * *New backup of an old phone* – the old phone gets a backup of its own (“Galaxy S7 - Sam”):
-    enter phone name and owner and tick the destination drive(s).
+    nested folders, duplicates) to one of your backups.
+  * *New backup (old phone or old drive)* – gets a backup of its own (e.g. “Galaxy S7 - Sam” or
+    “Old drive - Sam”): enter a name and the owner and tick the destination drive(s).
 
-  Add one or more folders (e.g. the copy of the old phone and of its SD card) and click
-  *Choose folders to import…*: every folder with files is listed with its photos / videos /
-  other files; app data, caches, thumbnails, trash and hidden folders are left out. Tick the
-  folders and choose for each one *Camera* (→ year/month folders) or *Other* (→ keeps its
-  original folder under `Year/other/pictures | movies | other-files/`). For an old phone the
-  camera folders and normal picture/movie/download folders are pre-ticked, messenger and
-  screenshot folders are not. Every file is hashed at the source and verified after writing,
-  identical files are stored only once (also against what is already in the backup), the old
-  folders are only read. Skipped files are listed in the report “Import <name> <date>”.
+  Add one or more folders (e.g. the copy of the old phone and of its SD card, or the photo folders
+  of the old drive) and click *Choose folders to import…*: every folder with files is listed with
+  its photos / videos / other files; app data, caches, thumbnails, trash and hidden folders are
+  left out. Tick the folders and choose for each one:
+  * *Sort into year/month folders* – the photos and videos are sorted by date exactly like a phone
+    backup (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *Keep folder as it is* – the folder is copied 1:1 with its name and path to the top of the
+    backup (e.g. `Urlaub Italien 2019/Tag 1/`). Each folder is imported with its own files, its
+    sub-folders are separate lines – tick them too to keep the whole folder tree.
+
+  For an old phone the camera folders are suggested for sorting, normal picture/movie/download
+  folders for keeping; messenger and screenshot folders are not pre-ticked. Every file is hashed at
+  the source and verified after writing, identical files are stored only once (also against what is
+  already in the backup), the old folders are only read. Skipped files are listed in the report
+  “Import <name> <date>”. (Imports made before version 0.9.8.3 put kept folders under
+  `Year/other/pictures | movies | other-files/` – they stay there.)
 * **Second storage (export)** – pick the backup, a second drive or **Google Drive** and the export
   type (*Automatic – Grandfather-Father-Son* by default). Earlier exports are listed; old ones can
   be cleaned up (only after you confirm). See *Second storage* below.
@@ -190,13 +198,18 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* Month folder name = year + month: `26.02` is February 2026. Backups made with older versions
+  (`02.February-photos` / `02.February-videos`) are converted before the next backup or export –
+  first the program lists the old month folders and you untick those that should **keep their old
+  name and structure** (they are never changed). The choice applies to every drive and to Google
+  Drive; files are only moved, never deleted. Your own folders and "keep folder structure" folders
+  are never touched.
 * Year and month folders are only created when a file goes into them - no empty folders.
 * Month = capture date from the photo/video metadata → otherwise the filename
   (`PXL_20261102_…`) → otherwise the file date.

@@ -192,13 +192,17 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* Numele folderului lunii = an + lună: `26.02` este februarie 2026. Backupurile versiunilor mai
+  vechi (`02.February-photos` / `02.February-videos`) sunt convertite înainte de următorul backup sau
+  export – mai întâi programul arată folderele vechi de lună și le debifezi pe cele care trebuie să
+  **își păstreze numele și structura** (nu sunt schimbate niciodată). Alegerea se aplică fiecărui
+  disc și Google Drive; fișierele sunt doar mutate, niciodată șterse. Folderele tale nu sunt atinse.
 * Folderele pentru ani și luni sunt create doar când un fișier ajunge în ele - fără foldere goale.
 * Luna = data capturii din metadatele fotografiei/videoclipului → altfel numele fișierului
   (`PXL_20261102_…`) → altfel data fișierului.

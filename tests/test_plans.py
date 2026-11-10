@@ -14,7 +14,7 @@ from phonebackup.export import EXPORT_DIR, Catalog, perform_restore
 from phonebackup.sources import FolderSource
 from tests.test_all import jpeg_with_exif
 
-SET = "Pixel 10 Pro - Sam Test"
+SET = "Sam Test/Pixel 10 Pro"              # <Owner>/<Phone>
 
 
 class PlansTest(unittest.TestCase):

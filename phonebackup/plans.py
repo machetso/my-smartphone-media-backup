@@ -1,8 +1,8 @@
 """Backup plan per backup drive (user request 2026-11-05): "simple" or "gfs".
 
-simple  one growing folder per phone: <base>/<Phone - Owner>/2026/01.January-photos/... (as always)
+simple  one growing folder per phone: <base>/<Phone - Owner>/2026/26.01/... (as always)
 gfs     Grandfather-Father-Son, the same layout as the second storage export:
-        <base>/<Phone - Owner>/2026-11-05_10-00-00_full/2026/01.January-photos/...
+        <base>/<Phone - Owner>/2026-11-05_10-00-00_full/2026/26.01/...
                               /2026-11-20_18-30-00_incremental/...
                               /.phonebackup-export/catalog.sqlite   (runs + files)
                               /.phonebackup/index.sqlite            (what is backed up)

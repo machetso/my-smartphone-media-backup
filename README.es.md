@@ -204,13 +204,17 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* Nombre de la carpeta del mes = año + mes: `26.02` es febrero de 2026. Las copias de versiones
+  anteriores (`02.February-photos` / `02.February-videos`) se convierten antes de la siguiente
+  copia o exportación – antes el programa muestra las carpetas de mes antiguas y desmarcas las que
+  deben **conservar su nombre y estructura** (nunca se cambian). La elección vale para cada disco y
+  para Google Drive; los archivos solo se mueven, nunca se borran. Tus propias carpetas nunca se tocan.
 * Las carpetas de año y mes solo se crean cuando un archivo va a parar a ellas: no hay carpetas vacías.
 * Mes = fecha de captura de los metadatos de la foto/vídeo → si no, el nombre del archivo
   (`PXL_20261102_…`) → si no, la fecha del archivo.

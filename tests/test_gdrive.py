@@ -128,6 +128,10 @@ class FakeDrive:
                 a, b = map(int, rng.split("=")[1].split("-"))
                 return 206, {}, data[a:b + 1]
             return 200, {}, data
+        if m and method == "PATCH" and json.loads(body or b"{}").get("trashed"):
+            self.files.pop(m.group(1))
+            self.trashed = getattr(self, "trashed", 0) + 1
+            return 200, {}, json.dumps({"id": m.group(1)}).encode()
         if m and method == "PATCH" and "addParents" not in qs:   # metadata update (lock heartbeat)
             f = self.files[m.group(1)]
             f.setdefault("appProperties", {}).update(json.loads(body).get("appProperties", {}))
@@ -137,6 +141,8 @@ class FakeDrive:
             f = self.files[m.group(1)]
             assert f["parents"] == [qs["removeParents"]], "moved from the wrong folder"
             f["parents"] = [qs["addParents"]]
+            if body and json.loads(body).get("name"):          # move + rename in one call
+                f["name"] = json.loads(body)["name"]
             self.moves += 1
             return 200, {}, json.dumps({"id": m.group(1)}).encode()
         if m and method == "DELETE":
@@ -177,10 +183,10 @@ class FakeDrive:
 
 
 def make_backup(base):
-    parent = Path(base) / "Pixel 10 Pro - Sam"
-    files = {"2026/01.January-photos/PXL_1.jpg": b"a" * 1000,
-             "2026/01.January-videos/PXL_2.mp4": b"b" * (gdrive.CHUNK + 5),
-             "2025/raw/12.December-raw/PXL_3.dng": b"c" * 10}
+    parent = Path(base) / "Sam" / "Pixel 10 Pro"
+    files = {"2026/26.01/PXL_1.jpg": b"a" * 1000,
+             "2026/26.01/PXL_2.mp4": b"b" * (gdrive.CHUNK + 5),
+             "2025/raw/25.12/PXL_3.dng": b"c" * 10}
     for rel, data in files.items():
         p = parent / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +213,7 @@ class GDriveExportTest(unittest.TestCase):
         status, paths, verdict = self.run_export(fake)
         self.assertEqual(status, "COMPLETED")
         self.assertTrue(verdict.startswith("EVERYTHING"), verdict)
-        prefix = f"{gdrive.ROOT_NAME}/Pixel 10 Pro - Sam/"
+        prefix = f"{gdrive.ROOT_NAME}/Sam/Pixel 10 Pro/"
         on_drive = fake.paths()
         for rel, data in self.data.items():
             self.assertEqual(on_drive[prefix + rel], data)
@@ -215,8 +221,8 @@ class GDriveExportTest(unittest.TestCase):
 
         # second run: nothing new → nothing uploaded, no duplicate folders
         n_before = len(fake.files)
-        (self.parent / "2026/02.February-photos").mkdir(parents=True)
-        (self.parent / "2026/02.February-photos/new.jpg").write_bytes(b"new")
+        (self.parent / "2026/26.02").mkdir(parents=True)
+        (self.parent / "2026/26.02/new.jpg").write_bytes(b"new")
         status, _, verdict = self.run_export(fake)
         self.assertEqual(status, "COMPLETED")
         self.assertIn("1 files", verdict)
@@ -229,10 +235,10 @@ class GDriveExportTest(unittest.TestCase):
     def test_conflict_not_overwritten(self):
         fake = FakeDrive()
         self.run_export(fake)
-        (self.parent / "2026/01.January-photos/PXL_1.jpg").write_bytes(b"other content")
+        (self.parent / "2026/26.01/PXL_1.jpg").write_bytes(b"other content")
         status, _, verdict = self.run_export(fake)
         self.assertTrue(verdict.startswith("ATTENTION"))
-        self.assertEqual(fake.paths()[f"{gdrive.ROOT_NAME}/Pixel 10 Pro - Sam/2026/01.January-photos/PXL_1.jpg"],
+        self.assertEqual(fake.paths()[f"{gdrive.ROOT_NAME}/Sam/Pixel 10 Pro/2026/26.01/PXL_1.jpg"],
                          b"a" * 1000)
 
     def test_checksum_mismatch_is_error(self):

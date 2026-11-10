@@ -87,10 +87,11 @@ def ask(prompt, default=None, allow_empty=False):
         print("  " + tr("Please enter a value."))
 
 
-def ask_install(title, text, details):
-    """Before anything is installed on a phone: always asked, never answered by default."""
+def ask_install(title, text, details, never_key=None):
+    """Before anything is installed on a phone: always asked, never answered by default.
+    never_key: offer "Never ask for this phone" (the GUI remembers it); the answer is then False."""
     if _handler and hasattr(_handler, "ask_install"):
-        return _handler.ask_install(title, text, details)
+        return _handler.ask_install(title, text, details, never_key)
     import re
     plain = lambda t: re.sub(r"<[^>]+>", "", t.replace("<br>", "\n").replace("</li>", "\n"))
     print(f"\n=== {title} ===\n{plain(text)}\n{plain(details)}")

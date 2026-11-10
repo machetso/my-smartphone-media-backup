@@ -1,10 +1,13 @@
 """Destination folder layout:
 
-<base>/<Phone - Owner>/2026/01.January-photos
-                           /01.January-videos
-                           /raw/01.January-raw
-                           /other/pictures|movies|other-files/<original folder>/   (old phone imports)
+<base>/<Phone - Owner>/2026/26.01                 (photos + videos of January 2026)
+                           /raw/26.01             (RAW photos)
+                           /other/pictures|movies|other-files/<original folder>/   (imports before 2026-11-09)
+                    /<kept folder>/…     (import "Keep folder as it is": the old folder 1:1)
                     /Pictures/Screenshots/…      ("keep folder structure" for non-camera folders)
+
+Until 2026-11-09 the month folders were 01.January-photos / 01.January-videos / raw/01.January-raw;
+migrate.py converts such backups (MONTHS stays for that).
 """
 
 import os
@@ -14,20 +17,20 @@ from pathlib import Path
 MONTHS = ["January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 
-KIND = {"photo": "photos", "video": "videos", "raw": "raw"}
 OTHER_KIND = {"other-photo": "pictures", "other-video": "movies", "other-file": "other-files"}
 
 
-def month_folder(month, category):
-    return f"{month:02d}.{MONTHS[month - 1]}-{KIND[category]}"
+def month_folder(dt):
+    """'26.02' for February 2026 (user decision 2026-11-09)."""
+    return f"{dt.year % 100:02d}.{dt.month:02d}"
 
 
 def relative_dir(dt, category):
     """Folder (relative to the backup parent folder) for a file taken at dt."""
     year = f"{dt.year:04d}"
     if category == "raw":
-        return Path(year) / "raw" / month_folder(dt.month, "raw")
-    return Path(year) / month_folder(dt.month, category)
+        return Path(year) / "raw" / month_folder(dt)
+    return Path(year) / month_folder(dt)
 
 
 def other_dir(dt, category, original_folder):
@@ -36,6 +39,16 @@ def other_dir(dt, category, original_folder):
     original_folder is a relative path like "WhatsApp/Media/WhatsApp Images" (any separator).
     """
     d = Path(f"{dt.year:04d}") / "other" / OTHER_KIND[category]
+    for part in str(original_folder).replace("\\", "/").split("/"):
+        if part not in ("", ".", ".."):
+            d = d / safe_name(part)
+    return d
+
+
+def keep_dir(original_folder):
+    """Import "Keep folder as it is" (user request 2026-11-09): the old folder 1:1 at the top of
+    the backup – 'Urlaub Italien 2019/Tag 1' (any separator) → Urlaub Italien 2019/Tag 1."""
+    d = Path()
     for part in str(original_folder).replace("\\", "/").split("/"):
         if part not in ("", ".", ".."):
             d = d / safe_name(part)

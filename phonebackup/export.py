@@ -2,7 +2,7 @@
 runs, and restore a complete copy from such a chain.
 
 Target layout:
-  <target base>/<Phone - Owner>/2026-11-02_14-30-00_full/2026/01.January-photos/...
+  <target base>/<Phone - Owner>/2026-11-02_14-30-00_full/2026/26.01/...
                                /2026-11-20_09-12-45_incremental/...
                                /2026-12-01_18-03-10_differential/...
                                /.phonebackup-export/catalog.sqlite
@@ -13,6 +13,7 @@ incremental   = everything new/changed since the last export of ANY type
 """
 
 import os
+import re
 import shutil
 import sqlite3
 import time
@@ -25,6 +26,8 @@ from . import gfs, ui
 from .copier import Cancelled, file_chunks, stream_copy
 from .i18n import tr, trp
 from .index import INTERNAL_DIR, open_readonly_lookup
+from .media import category_for
+from .migrate import NO_KEEP, convert_rel, decision
 from .report import both, unique_basename, write_reports
 from .safety import inside, safe_rel, valid_run_folder
 
@@ -143,16 +146,12 @@ def scan_backup(parent):
 
 
 def _category(rel):
-    r = rel.lower()
-    if r.split("/")[1:2] == ["other"]:
+    """photo / video / raw for files in the year/month folders (by the file type, since photos and
+    videos share the month folder), other for everything else."""
+    parts = rel.replace("\\", "/").split("/")
+    if len(parts) < 3 or not re.fullmatch(r"\d{4}", parts[0]) or parts[1].lower() == "other":
         return "other"
-    if "/raw/" in r:
-        return "raw"
-    if "-photos/" in r:
-        return "photo"
-    if "-videos/" in r:
-        return "video"
-    return "other"
+    return category_for(parts[-1]) or "other"
 
 
 def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None, overwrite=False):
@@ -199,8 +198,13 @@ def _verified_copy(src, dst_dir_tmp, final, expected_sha, cfg, prog, cancel=None
 
 
 def perform_export(source_parent, target_base, mode, cfg, cancel=None, now=None):
+    from . import migrate, setfolders
     source_parent = Path(source_parent)
-    target_parent = Path(target_base) / source_parent.name
+    setfolders.relocate(target_base, cfg)             # old 'Phone - Owner' exports -> Owner/Phone
+    target_parent = Path(target_base) / setfolders.rel_of(source_parent)
+    keep = migrate.effective_keep(cfg, source_parent)   # old month folders -> 2026/26.02 (both
+    migrate.ensure_converted(source_parent, keep=keep)  # sides, the same folders kept)
+    migrate.ensure_converted(target_parent, keep=keep)
     cat = Catalog(target_parent)
     chosen_by = None
     if mode == "auto":                         # Grandfather-Father-Son decides
@@ -315,8 +319,9 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None, now=None)
     columns = [tr("Nr"), tr("File"), tr("Type"), tr("Size"), tr("Bytes"), tr("Path in backup"), tr("Status"),
                tr("SHA-256"), tr("Location")]
     # file name English, title inside translated
-    base = unique_basename(run_dir, f"Export {source_parent.name} {mode}", started)
-    paths = write_reports(run_dir, base, tr("Export (%s) %s - %s", gfs.mode_name(mode), source_parent.name,
+    set_key = setfolders.key_of(source_parent)
+    base = unique_basename(run_dir, f"Export {set_key} {mode}", started)
+    paths = write_reports(run_dir, base, tr("Export (%s) %s - %s", gfs.mode_name(mode), set_key,
                                             f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections, columns, rows)
     (ui.ok if ok else ui.error)(verdict)
@@ -385,6 +390,8 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     if not chain:
         cat.close()
         raise ValueError(tr("No completed full export found - nothing to restore from."))
+    from .setfolders import key_of
+    keep = decision(cfg, key_of(target_parent)) or NO_KEEP     # restored in the new layout
     plan, refused = {}, []
     for run in chain:                                  # later runs win
         for rel, (sz, _mt, sha) in cat.files_of([run.id]).items():
@@ -406,7 +413,8 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
     rows, errors, status = [], 0, "COMPLETED"
     try:
         for i, (rel, (run, sz, sha)) in enumerate(sorted(plan.items()), 1):
-            src, dst = inside(target_parent / run.folder, rel), inside(restore_dir, rel)
+            # an export from before 2026-11-09 is restored in the new layout (2026/26.02)
+            src, dst = inside(target_parent / run.folder, rel), inside(restore_dir, convert_rel(rel, keep) or rel)
             if src is None or dst is None:
                 st, got = both.tr("ERROR: path outside the export or restore folder - refused"), None
             else:

@@ -53,6 +53,20 @@ object UsbDebug {
         return null
     }
 
+    /** Developer options + Wireless debugging on, USB debugging off (one connection per backup).
+     *  The old rule "the app never switches Wireless debugging on" was dropped (user 2026-11-10);
+     *  the same guard switches it off again: 5 min without a backup, 2 min without the computer,
+     *  end of the backup, app update, reboot. Returns an error text or null. */
+    fun switchOnWireless(context: Context): String? {
+        if (!canSwitch(context)) return tr("Not allowed yet – connect the phone once with USB debugging switched on by hand.")
+        if (Announce.wifiAddress(context) == null) return tr("Connect the phone to a Wi-Fi first.")
+        put(context, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 1)
+        put(context, "adb_wifi_enabled", 1)
+        Guard.markSwitchedOn(context, true)
+        Guard.armStart(context)
+        return null
+    }
+
     /** USB debugging and Wireless debugging off (the Developer options stay). */
     fun switchOff(context: Context): String? {
         if (!canSwitch(context)) return tr("Not allowed.")
@@ -150,9 +164,9 @@ object UsbDebug {
                 val left = startDeadline - now
                 if (left <= 0) {
                     switchOff(context)
-                    return tr("No backup started within 5 minutes – USB debugging switched off.")
+                    return tr("No backup started within 5 minutes – debugging switched off.")
                 }
-                text = tr("USB debugging switches off in %d:%02d if no backup starts.", left / 60_000, left / 1000 % 60)
+                text = tr("Debugging switches off in %d:%02d if no backup starts.", left / 60_000, left / 1000 % 60)
             } else if (lastAlive != 0L) {
                 if (now - lastAlive > ALIVE_MS) {
                     val wifi = channel == "wifi"

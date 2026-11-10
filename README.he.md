@@ -189,13 +189,17 @@ PhoneBackups/
 └── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
     ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
     ├── 2026/
-    │   ├── 01.January-photos/  …  12.December-photos/
-    │   ├── 01.January-videos/  …  12.December-videos/
-    │   ├── raw/01.January-raw/ …                  (only if RAW/DNG files exist)
+    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
+    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
     │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
     └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
 ```
 
+* שם תיקיית החודש = שנה + חודש: `26.02` הוא פברואר 2026. גיבויים של גרסאות קודמות
+  (`02.February-photos` / `02.February-videos`) מומרים לפני הגיבוי או הייצוא הבא – קודם התוכנה
+  מציגה את תיקיות החודש הישנות ואתה מבטל את הסימון בתיקיות ש**שומרות על השם והמבנה הישנים** (הן
+  לעולם לא משתנות). הבחירה חלה על כל כונן ועל Google Drive; קבצים רק מועברים, לעולם לא נמחקים.
+  התיקיות שלך לעולם לא נוגעות.
 * תיקיות שנה וחודש נוצרות רק כשקובץ נכנס אליהן - בלי תיקיות ריקות.
 * חודש = תאריך הצילום מנתוני המטא של התמונה/הסרטון ← אחרת שם הקובץ
   (`PXL_20261102_…`) ← אחרת תאריך הקובץ.

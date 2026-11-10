@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
     private var pairReady by mutableStateOf(false)    // code shown: waiting for the user's tap
     private var canSwitchUsb by mutableStateOf(false)
     private var usbInfo by mutableStateOf("")
+    private var usbOnInfo by mutableStateOf("")      // "… is on" – shown only while the guard runs
+    private var connectInfo by mutableStateOf("")
 
     private val askMedia = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refresh()
@@ -117,6 +119,23 @@ class MainActivity : ComponentActivity() {
             return
         }
         val data = intent?.data
+        // "Connect phone" QR code of a paired computer: backup mode on, then tell the computer
+        data?.let { Connect.parse(this, it) }?.let { (req, err) ->
+            setIntent(Intent())
+            if (req == null) { connectInfo = err; return }
+            connectInfo = tr("Connecting to %s …", req.pc.name)
+            BackupService.start(this)
+            thread {
+                var tries = 0
+                while (BackupService.server?.port.let { it == null || it == 0 } && tries++ < 50) Thread.sleep(100)
+                val e = Connect.tellComputer(this, req, BackupService.server?.port ?: 0)
+                runOnUiThread {
+                    connectInfo = e?.let { tr("%s – the computer may still find the phone in the Wi-Fi.", it) }
+                        ?: tr("Connected to %s – start the backup on the computer.", req.pc.name)
+                }
+            }
+            return
+        }
         val p = data?.let { Pairing.parse(it) }
         if (p == null) {
             if (data?.scheme == "phonebackup" && data.host == "pair") {
@@ -259,15 +278,31 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
-                                usbInfo = UsbDebug.switchOn(this@MainActivity)
-                                    ?: tr("USB debugging is on – plug in the cable now.")
-                                BackupService.start(this@MainActivity)     // runs the 5-minute guard
+                                val err = UsbDebug.switchOn(this@MainActivity)
+                                usbInfo = err ?: ""
+                                usbOnInfo = if (err == null) tr("USB debugging is on – plug in the cable now.") else ""
+                                if (err == null) BackupService.start(this@MainActivity)   // runs the 5-minute guard
                             }) { Text(tr("Allow backup over cable")) }
                             OutlinedButton(onClick = {
+                                usbOnInfo = ""
                                 usbInfo = UsbDebug.switchOff(this@MainActivity) ?: tr("USB debugging is off.")
                             }) { Text(tr("Switch off")) }
                         }
+                        Text(tr("No cable at hand? Wireless debugging works over Wi-Fi (the computer must have " +
+                            "been paired once with “Pair over Wi-Fi…”). It is switched off the same way."),
+                            style = MaterialTheme.typography.bodySmall)
+                        // same look as "Allow backup over cable" (user request 2026-11-10)
+                        Button(onClick = {
+                            val err = UsbDebug.switchOnWireless(this@MainActivity)
+                            usbInfo = err ?: ""
+                            usbOnInfo = if (err == null) tr("Wireless debugging is on – start the backup on the computer.") else ""
+                            if (err == null) BackupService.start(this@MainActivity)     // runs the 5-minute guard
+                        }) { Text(tr("Allow backup over Wireless debugging")) }
                         if (usbInfo.isNotEmpty()) Text(usbInfo, style = MaterialTheme.typography.bodySmall)
+                        // "is on" only while it really is on: the guard switches it off after 5 minutes
+                        // without a backup (fix 2026-11-10: the text stayed after the switch-off)
+                        if (usbOnInfo.isNotEmpty() && UsbDebug.Guard.text.isNotEmpty())
+                            Text(usbOnInfo, style = MaterialTheme.typography.bodySmall)
                         if (UsbDebug.Guard.text.isNotEmpty()) Text(UsbDebug.Guard.text, fontWeight = FontWeight.SemiBold)
                     }
                 }
@@ -278,6 +313,7 @@ class MainActivity : ComponentActivity() {
                     Text(if (running) tr("Backup mode is ON") else tr("Backup mode is off"),
                         fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     if (AppState.status.isNotEmpty()) Text(AppState.status)
+                    if (connectInfo.isNotEmpty()) Text(connectInfo, fontWeight = FontWeight.SemiBold)
                     if (running) {
                         Text(tr("Phone address: %s  ·  port %d",
                             Announce.wifiAddress(this@MainActivity)?.hostAddress ?: tr("no network"), AppState.port),
