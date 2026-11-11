@@ -1,6 +1,7 @@
 """Connect without a cable: the QR code; the phone app over Bluetooth (user request 2026-11-10)."""
 import json
 import time
+import importlib.util
 import unittest
 import urllib.parse
 import urllib.request
@@ -65,6 +66,7 @@ class PhoneAppInstallTest(unittest.TestCase):
             with self.assertRaises(btsend.BtSendError):
                 btsend.send_apk("00:11:22:33:44:55", other, "0.7.0")
 
+    @unittest.skipUnless(importlib.util.find_spec("PySide6"), "PySide6 not installed")
     def test_reinstall_question_and_versions(self):
         from phonebackup import companion
         from phonebackup.gui_backups import _older

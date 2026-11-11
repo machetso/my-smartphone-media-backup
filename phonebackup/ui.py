@@ -14,6 +14,13 @@ if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
 
 _COLOR = sys.stdout is not None and sys.stdout.isatty()
 
+# a console that cannot show a character (Windows cp1252: "→", "–" …) gets "?" instead of a crash
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+
 # A graphical front end can install a handler object with the methods
 # log(level, text), ask(prompt, default), ask_yes_no(prompt, default), choose(prompt, options, default),
 # ask_directory(prompt) and progress(dict). Without a handler everything goes to the terminal.

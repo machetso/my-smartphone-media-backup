@@ -1,6 +1,16 @@
 # Changelog
 
-## [0.9.8.3] - 2026-11-11
+## [0.9.8.4] - 2026-11-11
+
+Includes everything listed under 0.9.8.3 (that version was tagged but never released – its build
+stopped on a Windows problem fixed here).
+
+### Fixed
+- **Windows: the program could stop with an error while moving old backup folders** to the new
+  `<Owner>/<Phone>` place, when the console cannot show a character of the message (e.g. “→”).
+  Such characters are now replaced instead.
+
+## [0.9.8.3] - 2026-11-11 (not released)
 
 ### Phone app: new package name
 - **The phone app has a new Android package name (`io.github.machetso.mediabackup`) and version
