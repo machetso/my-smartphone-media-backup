@@ -5,22 +5,22 @@ from phonebackup import wireless
 
 class WirelessTest(unittest.TestCase):
     def test_is_wireless(self):
-        self.assertFalse(wireless.is_wireless("5A111FDCH0014T"))
+        self.assertFalse(wireless.is_wireless("PX10TEST000001"))
         self.assertTrue(wireless.is_wireless("192.168.1.23:37123"))
-        self.assertTrue(wireless.is_wireless("adb-5A111FDCH0014T-AbCdEf._adb-tls-connect._tcp"))
+        self.assertTrue(wireless.is_wireless("adb-PX10TEST000001-AbCdEf._adb-tls-connect._tcp"))
 
     def test_usb_first(self):
-        self.assertEqual(wireless.usb_first(["10.42.0.5:4000", "5A111FDCH0014T"]),
-                         ["5A111FDCH0014T", "10.42.0.5:4000"])
+        self.assertEqual(wireless.usb_first(["10.42.0.5:4000", "PX10TEST000001"]),
+                         ["PX10TEST000001", "10.42.0.5:4000"])
 
     def test_parse_mdns(self):
         out = ("List of discovered mdns services\n"
-               "adb-5A11-AbCd\t_adb-tls-connect._tcp\t192.168.1.23:37123\n"
+               "adb-PX10-AbCd\t_adb-tls-connect._tcp\t192.168.1.23:37123\n"
                "phonebackup-1a2b3c4d\t_adb-tls-pairing._tcp.\t192.168.1.23:41234\n"
                "garbage line\n")
         svcs = wireless.parse_mdns(out)
         self.assertEqual([(s.name, s.kind, s.address) for s in svcs],
-                         [("adb-5A11-AbCd", wireless.CONNECT, "192.168.1.23:37123"),
+                         [("adb-PX10-AbCd", wireless.CONNECT, "192.168.1.23:37123"),
                           ("phonebackup-1a2b3c4d", wireless.PAIRING, "192.168.1.23:41234")])
 
     def test_parse_avahi(self):

@@ -98,7 +98,7 @@ class ImportOldBackup(unittest.TestCase):
                 "2018/raw/18.02/_DSC1234.NEF", "2019/19.07/DSC_0001.JPG",
                 "2019/19.07/DSC_0001_1.JPG", "2025/25.03/IMG_A.jpg"])
             today = datetime.now().strftime("%Y-%m-%d")
-            txt = (parent / f"Import old backup 2019 {today}.txt").read_text(encoding="utf-8")
+            txt = (parent / "Logs" / f"Import old backup 2019 {today}.txt").read_text(encoding="utf-8")
             self.assertIn("Imported folder", txt)
             self.assertIn("letter.pdf", txt)
             self.assertIn("skipped (not a photo/video file)", txt)

@@ -293,10 +293,71 @@ def convert_set(set_dir, keep=NO_KEEP):
     return stats["moved"], stats["kept"]
 
 
+# reports written by versions before 2026-11-11, next to the year folders (file names are English)
+_OLD_REPORT = re.compile(r"^(Backup|Import|Export|Restore report) .+\.(txt|html|csv)$")
+
+
+def _tracked(db_path, sql, args):
+    if not db_path.is_file():
+        return set()
+    try:
+        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            return {r for (r,) in db.execute(sql, args)}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None                          # unknown: better move nothing
+
+
+def move_old_reports(set_dir):
+    """Move the reports of old versions into the Logs folder (user request 2026-11-11). Files a
+    catalog or index lists as backed-up files (e.g. the reports of a backup copied by an export)
+    stay where they are, a file already in Logs is never overwritten. Returns the number moved."""
+    from .report import logs_dir
+    set_dir = Path(set_dir)
+    moved = 0
+    if not set_dir.is_dir():
+        return moved
+    for root in _roots(set_dir):
+        try:
+            names = [p.name for p in root.iterdir() if p.is_file() and _OLD_REPORT.match(p.name)]
+        except OSError:
+            continue
+        if not names:
+            continue
+        if root == set_dir:
+            tracked = _tracked(set_dir / INDEX_REL, "SELECT rel_path FROM files WHERE rel_path NOT LIKE '%/%'", ())
+        else:
+            tracked = _tracked(set_dir / CATALOG_REL, "SELECT f.rel FROM files f JOIN runs r ON r.id = f.run_id "
+                                                      "WHERE r.folder = ?", (root.name,))
+        if tracked is None:
+            continue
+        for n in names:
+            dst = logs_dir(root) / n
+            if n in tracked or dst.exists():
+                continue
+            try:
+                dst.parent.mkdir(exist_ok=True)
+                os.rename(root / n, dst)          # same drive: a rename
+                moved += 1
+            except OSError:
+                pass                              # tried again next time
+    return moved
+
+
 def ensure_converted(set_dir, label="", keep=None):
     """Convert a backup folder if it still has old month folders that are not kept (shows what
-    it does). keep=None: the user has not chosen yet – nothing is changed."""
+    it does). keep=None: the user has not chosen yet – nothing is changed.
+    Also moves the reports of old versions into the Logs folder."""
     set_dir = Path(set_dir)
+    try:
+        n = move_old_reports(set_dir)
+        if n:
+            ui.info(trp("%s: %d old report moved into the Logs folder.",
+                        "%s: %d old reports moved into the Logs folder.", n, label or set_dir, n))
+    except OSError:
+        pass
     try:
         if keep is None:
             if old_folders(set_dir):         # (a note only – never true for kept import folders)

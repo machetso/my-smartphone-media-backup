@@ -97,8 +97,8 @@ class OldPhoneImport(unittest.TestCase):
             "Pictures/Instagram/insta.jpg",
         ])  # WhatsApp copy of the camera photo is stored once, Thumbs.db / app data / cache never
         self.assertTrue(any(p.name == "Import Galaxy S7 Sam " + f"{datetime.now():%Y-%m-%d}.txt"
-                            for p in root.iterdir()))
-        report = next(p for p in root.iterdir() if p.suffix == ".txt").read_text(encoding="utf-8")
+                            for p in (root / "Logs").iterdir()))
+        report = next(p for p in (root / "Logs").iterdir() if p.suffix == ".txt").read_text(encoding="utf-8")
         self.assertIn("Smartphone", report)
         self.assertIn("Thumbs.db", report)
         self.assertEqual(_category("2017/other/pictures/Download/meme.png"), "other")

@@ -9,7 +9,7 @@ SAMSUNG_USB = P.PhoneId("SM-G780G", "samsung", "RF8TEST0001", "", "usb-adb")
 SAMSUNG_APP = P.PhoneId("SM-G780G", "samsung", "", "app-samsung", "app-wifi")
 SAMSUNG_LINKED = P.PhoneId("SM-G780G", "samsung", "RF8TEST0001", "app-samsung", "usb-adb")
 PIXEL_APP = P.PhoneId("Pixel 10 Pro", "Google", "", "app-pixel", "app-wifi")
-PIXEL_USB = P.PhoneId("Pixel 10 Pro", "Google", "5A111FDCH0014T", "", "usb-adb")
+PIXEL_USB = P.PhoneId("Pixel 10 Pro", "Google", "PX10TEST000001", "", "usb-adb")
 OTHER_S20 = P.PhoneId("SM-G780G", "samsung", "OTHERSERIAL", "", "usb-adb")
 
 
@@ -82,6 +82,20 @@ class OldReportTest(unittest.TestCase):
             self.assertEqual(P.compare(rec, PIXEL_APP), P.MISMATCH)
             self.assertEqual(P.compare(rec, SAMSUNG_USB), P.MATCH)
             self.assertEqual(P.compare(rec, SAMSUNG_APP), P.PROBABLE)
+
+    def test_identity_from_report_in_logs_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "Logs").mkdir()
+            (Path(d) / "Logs" / "Backup Galaxy A55 Kim 2026-11-11.txt").write_text(
+                "  Smartphone       : SM-G780G\n"
+                "  Connection       : ADB - ADB (USB debugging), serial RF8TEST0002, Android 13\n",
+                encoding="utf-8")
+            (Path(d) / "Backup Galaxy A55 Kim 2026-11-04.txt").write_text(      # old place
+                "  Smartphone       : SM-G780G\n"
+                "  Connection       : ADB - ADB (USB debugging), serial RF8TEST0001, Android 13\n",
+                encoding="utf-8")
+            rec = P.load(d)
+            self.assertEqual((rec.model, sorted(rec.serials)), ("SM-G780G", ["RF8TEST0001", "RF8TEST0002"]))
 
 
 class CableAdviceTest(unittest.TestCase):

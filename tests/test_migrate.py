@@ -33,11 +33,11 @@ def write(root, files):
         p.write_bytes(data)
 
 
-def files_below(root, skip=(".phonebackup", ".phonebackup-export")):
+def files_below(root, skip=(".phonebackup", ".phonebackup-export", "Logs")):
     root = Path(root)
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*")
             if p.is_file() and not set(p.relative_to(root).parts) & set(skip)
-            and len(p.relative_to(root).parts) > 1}          # not the reports in the top folder
+            and len(p.relative_to(root).parts) > 1}          # not reports of old versions in the top folder
 
 
 def no_conversion():
@@ -151,6 +151,58 @@ class DiskTest(unittest.TestCase):
         self.assertEqual(st, "COMPLETED")
         got = {k: v for k, v in files_below(out).items() if not k.startswith("Restore report")}
         self.assertEqual(got, NEW)
+
+
+class OldReportsTest(unittest.TestCase):
+    """Reports of versions before 2026-11-11 (next to the year folders) move into Logs/."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_simple_backup(self):
+        src = Path(self.tmp.name) / "main" / SET
+        write(src, {**NEW, "Backup Pixel 10 Pro Sam 2026-11-01.txt": b"r1",
+                    "Backup Pixel 10 Pro Sam 2026-11-01.html": b"r2",
+                    "Import old backup 2019 2026-11-02.csv": b"r3",
+                    "notes.txt": b"mine",                                   # not a report: stays
+                    "Logs/Backup Pixel 10 Pro Sam 2026-11-03.txt": b"new",
+                    "Backup Pixel 10 Pro Sam 2026-11-03.txt": b"same name"})  # taken: stays
+        self.assertEqual(migrate.move_old_reports(src), 3)
+        self.assertEqual(sorted(p.name for p in src.iterdir() if p.is_file()),
+                         ["Backup Pixel 10 Pro Sam 2026-11-03.txt", "notes.txt"])
+        self.assertEqual((src / "Logs" / "Backup Pixel 10 Pro Sam 2026-11-01.txt").read_bytes(), b"r1")
+        self.assertEqual((src / "Logs" / "Backup Pixel 10 Pro Sam 2026-11-03.txt").read_bytes(), b"new")
+        self.assertEqual(sorted(p.name for p in (src / "Logs").iterdir()),
+                         ["Backup Pixel 10 Pro Sam 2026-11-01.html", "Backup Pixel 10 Pro Sam 2026-11-01.txt",
+                          "Backup Pixel 10 Pro Sam 2026-11-03.txt", "Import old backup 2019 2026-11-02.csv"])
+        self.assertEqual(files_below(src), NEW)                              # photos untouched
+        self.assertEqual(migrate.move_old_reports(src), 0)                  # nothing left to do
+
+    def test_export_keeps_copied_reports(self):
+        """An export copied the backup's old reports as backed-up files: those stay (a restore
+        needs them where the catalog says), only the export's own old report moves."""
+        src = Path(self.tmp.name) / "main" / SET
+        target = Path(self.tmp.name) / "hdd2"
+        write(src, {**NEW, "Backup Pixel 10 Pro Sam 2026-11-01.txt": b"r1"})
+        with no_conversion()[0]:                        # an old version: reports stay in the top folder
+            st, _, _ = export.perform_export(src, target, "full", CFG)
+        self.assertEqual(st, "COMPLETED")
+        tparent = target / SET
+        cat = export.Catalog(tparent)
+        run = cat.runs()[0]
+        cat.close()
+        run_dir = tparent / run.folder
+        own = sorted((run_dir / "Logs").iterdir())
+        for p in own:                                   # as an old version wrote it
+            p.rename(run_dir / p.name)
+        (run_dir / "Logs").rmdir()
+        migrate.move_old_reports(tparent)
+        self.assertTrue((run_dir / "Backup Pixel 10 Pro Sam 2026-11-01.txt").is_file())
+        self.assertEqual(sorted(p.name for p in (run_dir / "Logs").iterdir()), [p.name for p in own])
+        out = Path(self.tmp.name) / "restore"
+        st, _, _ = export.perform_restore(tparent, run.id, out, CFG)
+        self.assertEqual(st, "COMPLETED")
 
 
 class DriveTest(unittest.TestCase):

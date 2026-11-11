@@ -28,7 +28,7 @@ from .i18n import tr, trp
 from .index import INTERNAL_DIR, open_readonly_lookup
 from .media import category_for
 from .migrate import NO_KEEP, convert_rel, decision
-from .report import both, unique_basename, write_reports
+from .report import both, logs_dir, unique_basename, write_reports
 from .safety import inside, safe_rel, valid_run_folder
 
 EXPORT_DIR = ".phonebackup-export"
@@ -320,8 +320,8 @@ def perform_export(source_parent, target_base, mode, cfg, cancel=None, now=None)
                tr("SHA-256"), tr("Location")]
     # file name English, title inside translated
     set_key = setfolders.key_of(source_parent)
-    base = unique_basename(run_dir, f"Export {set_key} {mode}", started)
-    paths = write_reports(run_dir, base, tr("Export (%s) %s - %s", gfs.mode_name(mode), set_key,
+    base = unique_basename(logs_dir(run_dir), f"Export {set_key} {mode}", started)
+    paths = write_reports(logs_dir(run_dir), base, tr("Export (%s) %s - %s", gfs.mode_name(mode), set_key,
                                             f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections, columns, rows)
     (ui.ok if ok else ui.error)(verdict)
@@ -441,8 +441,8 @@ def perform_restore(target_parent, upto_id, restore_dir, cfg, cancel=None):
                                  (tr("Duration"), ui.human_duration(time.monotonic() - t0)),
                                  (tr("Average speed"),
                                   tr("%s/s", ui.human_size(prog.bytes / max(time.monotonic() - t0, 0.001))))])]
-    base = unique_basename(restore_dir, "Restore report", started)          # file name: English
-    paths = write_reports(restore_dir, base, tr("Restore %s - %s", target_parent.name,
+    base = unique_basename(logs_dir(restore_dir), "Restore report", started)   # file name: English
+    paths = write_reports(logs_dir(restore_dir), base, tr("Restore %s - %s", target_parent.name,
                                                 f"{started:%Y-%m-%d %H:%M}"),
                           ok, verdict, sections,
                           [tr("Nr"), tr("File"), tr("Size"), tr("Path"), tr("Taken from export"), tr("Status"),

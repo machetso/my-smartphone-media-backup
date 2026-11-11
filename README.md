@@ -109,7 +109,7 @@ drives. *Select all* / *Remove from list* hide phones (their backups stay on the
   `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
   …) or lets you type one (*Select all* / *Select none*); *Remove*.
   **Keep the phone's folder structure** (option): files from folders other than the camera
-  folder land in the same folders in the backup, e.g. `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
+  folder land in the same folders in the backup, e.g. `Sam/Pixel 10 Pro/Pictures/Screenshots/`;
   the camera folder is always sorted into year/month folders. Files already backed up stay
   where they are; identical files are still stored only once.
 * **Backup destinations** – the list of destination drives; long folder names can be scrolled
@@ -195,13 +195,15 @@ If PySide6 is missing, `smartphone_media_backup.py` starts the terminal version 
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
 * Month folder name = year + month: `26.02` is February 2026. Backups made with older versions
@@ -214,6 +216,12 @@ PhoneBackups/
 * Month = capture date from the photo/video metadata → otherwise the filename
   (`PXL_20261102_…`) → otherwise the file date.
 * Motion photos (`*.MP.jpg`), HEIC, PNG, … count as photos; DNG and other RAW files go to `raw/`.
+* Backup folder = owner / phone (`Sam/Pixel 10 Pro`). Backups made with older versions
+  (`Pixel 10 Pro - Sam`) are moved there automatically; if both exist, they are merged – nothing is
+  overwritten or deleted.
+* Reports (`.txt` / `.html` / `.csv`) and the log of a job that ended without a report go into the
+  `Logs` folder next to the year folders. Reports of older versions are moved there automatically
+  before the next backup, import or export.
 * A second report on the same day gets the time added to its name.
 * Nothing is ever deleted: not on the phone, not in the backup.
 * Same name but different content → the new file is saved as `name_1.jpg`. Identical content
@@ -325,8 +333,8 @@ folder keeps the plan it was started with.
 gets its own folder:
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

@@ -113,12 +113,12 @@ class EndToEnd(unittest.TestCase):
                  and ".phonebackup" not in p.parts]
         self.assertEqual(empty, [])
         # report in the parent folder, named as requested
-        names = sorted(p.name for p in parent1.iterdir() if p.is_file())
+        names = sorted(p.name for p in (parent1 / "Logs").iterdir() if p.is_file())
         today = datetime.now().strftime("%Y-%m-%d")
         self.assertIn(f"Backup Pixel 10 Pro Sam Test {today}.txt", names)
         self.assertIn(f"Backup Pixel 10 Pro Sam Test {today}.html", names)
         self.assertIn(f"Backup Pixel 10 Pro Sam Test {today}.csv", names)
-        txt = (parent1 / f"Backup Pixel 10 Pro Sam Test {today}.txt").read_text(encoding="utf-8")
+        txt = (parent1 / "Logs" / f"Backup Pixel 10 Pro Sam Test {today}.txt").read_text(encoding="utf-8")
         self.assertIn("EVERYTHING COPIED CORRECTLY", txt)
         self.assertIn("skipped (not a photo/video file)", txt)
         self.assertNotIn(".trashed", txt)
@@ -127,7 +127,7 @@ class EndToEnd(unittest.TestCase):
         status, paths, results, _ = self.run_backup()
         self.assertEqual(results, [])
         # second report on the same day gets the time added
-        self.assertEqual(len([p for p in parent1.glob("Backup *.txt")]), 2)
+        self.assertEqual(len([p for p in (parent1 / "Logs").glob("Backup *.txt")]), 2)
 
         # ---- new files: same name/other content in another folder, identical copy under new name
         self.write("DCIM/Other/IMG_0001.jpg", jpeg_with_exif("2025:03:15 11:00:00", b"different"))

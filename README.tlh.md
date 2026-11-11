@@ -106,7 +106,7 @@ De' jengva'meyDaq tu'lu'. *Hoch yIwIv* / *tetlhvo' yIteq* HablI'mey So' (polghac
   `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
   …) pagh wa' DaghItlhlaH (*Hoch yIwIv* / *pagh yIwIv*); *yIteq*.
   **HablI' 'aplo' tlhegh pol** (DuH): camera 'aplo' latlh 'aplo'mey vo' ghItlhmey
-  polghachDaq 'aplo'mey rapDaq ratlh, rur `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
+  polghachDaq 'aplo'mey rapDaq ratlh, rur `Sam/Pixel 10 Pro/Pictures/Screenshots/`;
   camera 'aplo' DIS/jar 'aplo'meyDaq lanlu' reH. ghItlhmey polta'pu'bogh
   Daqchajvo' vIHbe'; ghItlh rap wa'logh neH pollu'.
 * **polghach Daqmey** – Daq De' jengva'mey tetlh; 'aplo' pongmey tIq
@@ -131,21 +131,29 @@ nom law'moHmeH mIw (tlhegh + USB debugging; USB 2 tlhegh Daq USB 3 tlhegh).
 
 **polghachmey yIlo'…** loS tabmey ghaj:
 
-* **polghach ngo' yIlIH** – cha' mIw:
+* **Daq ngo' / ghogh HablI' ngo'** – De' jengva' ngo' pagh HablI' ngo' mIlloghmey HaStamey je
+  HablI' polghach rur yIpol. cha' mIw:
   * *polghach ghajbogh yIchel* – polghachmey ngo' pagh 'aplo'mey Hoch (mIlloghmey, HaStamey, RAW,
-    'aplo'mey qoDbogh, ghItlh rap) polghachlIj wa'Daq chel, DIS/jar 'aplo'mey rapDaq lanlu'.
-  * *HablI' ngo' polghach chu'* – HablI' ngo' polghach Daj Suq (“Galaxy S7 - Sam”):
-    HablI' pong ghajwI' pong je yIghItlh 'ej Daq De' jengva'(mey) yIwIv.
+    'aplo'mey qoDbogh, ghItlh rap) polghachlIj wa'Daq chel.
+  * *qawHaq chu' (ghogh HablI' ngo' pagh Daq ngo')* – polghach Daj Suq (rur “Galaxy S7 - Sam” pagh
+    “Old drive - Sam”): pong ghajwI' je yIghItlh 'ej Daq De' jengva'(mey) yIwIv.
 
-  'aplo' wa' pagh law' yIchel (rur HablI' ngo' chIl 'ej SD card Daj chIl) 'ej
-  *lIHmeH 'aplo'mey yIwIv…* yIHot: ghItlh ghajbogh Hoch 'aplo' tetlhDaq 'agh, mIlloghmey / HaStamey /
-  latlh ghItlhmey je; ghun De', cache, mIllogh mach, veQ, 'aplo'mey So'lu'bogh je Qoylu'. 'aplo'mey
-  yIwIv 'ej Hoch vaD *Camera* (→ DIS/jar 'aplo'mey) pagh *latlh* (→ 'aplo' ngo' Daj
-  `Year/other/pictures | movies | other-files/` bIngDaq pol) yIwIv. HablI' ngo'vaD
-  camera 'aplo'mey 'ej mIllogh/qon/Suq 'aplo'mey motlh wIvlu'pu', QIn QumwI' 'aplo'mey
-  screenshot 'aplo'mey je wIvlu'be'. Hoch ghItlh Hal Daq hash chenmoHlu' 'ej ghItlhDI' nIDlu',
-  ghItlh rap wa'logh neH pollu' (polghachDaq ghItlh ghajbogh rap nIDlu' je), 'aplo'mey
-  ngo' laDlu' neH. ghItlhmey Qoylu'bogh QIn “Import <name> <date>”Daq tetlhlu'.
+  'aplo' wa' pagh law' yIchel (rur HablI' ngo' ghItlhqa' 'ej SD card Daj ghItlhqa', pagh De' jengva'
+  ngo' mIllogh 'aplo'mey) 'ej *lIHmeH 'aplo'mey yIwIv…* yIHot: ghItlh ghajbogh Hoch 'aplo' tetlhDaq
+  'agh, mIlloghmey / HaStamey / latlh ghItlhmey je; ghun De', cache, mIllogh mach, veQ, 'aplo'mey
+  So'lu'bogh je Qoylu'. 'aplo'mey yIwIv 'ej Hoch vaD wa' yIwIv:
+  * *DIS/jar qawHaq Daq yIlInmoH* – HablI' polghach rur jaj Dung mIlloghmey HaStamey je lanlu'
+    (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *qawHaq yIchoHQo'* – 'aplo' 1:1 ghItlhqa'lu', pong He je, polghach Dung Daq
+    (rur `Urlaub Italien 2019/Tag 1/`). Hoch 'aplo' ghItlhmeyDaj neH lIHlu'; 'aplo'mey bIngDaj
+    tetlh latlh – 'aplo' Sor naQ polmeH, chaH je yIwIv.
+
+  HablI' ngo'vaD camera 'aplo'mey lanmeH chup, mIllogh/qon/Suq 'aplo'mey motlh polmeH chup;
+  QIn QumwI' 'aplo'mey screenshot 'aplo'mey je wIvlu'be'. Hoch ghItlh Hal Daq hash chenmoHlu' 'ej
+  ghItlhDI' nIDlu', ghItlh rap wa'logh neH pollu' (polghachDaq ghItlh ghajbogh rap nIDlu' je),
+  'aplo'mey ngo' laDlu' neH. ghItlhmey Qoylu'bogh QIn “Import <name> <date>”Daq tetlhlu'.
+  (mI' 0.9.8.3 retlhDaq lIHghachmey 'aplo'mey polbogh `Year/other/pictures | movies | other-files/`
+  bIngDaq lan – pa' ratlh.)
 * **latlh Daq (lel)** – polghach, cha'DIch De' jengva' pagh **Google Drive**, lel
   Segh je yIwIv (motlh *Automatic – vav'a'-vav-puqloD*). lel ngo' tetlhlu'; ngo'mey
   teqlaH (DaHarqangDI' neH). bIngDaq *latlh Daq* yIlegh.
@@ -184,22 +192,31 @@ PySide6 tu'lu'be'chugh, `smartphone_media_backup.py` terminal Segh tagh ghaH ta'
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
-* jar qawHaq pong = DIS + jar: `26.02` 'oH jar cha' DIS 2026. qawHaq ngo' (`02.February-photos` /
-  `02.February-videos`) moj – wa'DIch qawHaq ngo' 'ang ghun, qawHaq **pong ngo' ratlhbogh**
-  DangaQHa'moH (not choH). Hoch Daq, Google Drive Daq je; ghItlh lalDan vIHmoH neH, Qaw'be'.
+* jar qawHaq pong = DIS + jar: `26.02` 'oH jar cha' DIS 2026. mI' ngo' polghachmey
+  (`02.February-photos` / `02.February-videos`) polghach pagh lel veb retlhDaq mojmoHlu' –
+  wa'DIch jar 'aplo'mey ngo' 'ang ghun, 'ej **pong ngo' mIw ngo' je ratlhnISbogh** 'aplo'mey
+  DawIvHa'moH (not choHlu'). wIvlIj Hoch De' jengva'Daq Google DriveDaq je lo'lu'; ghItlhmey
+  vIHlu' neH, teqlu'be' not. 'aplo'meylIj 'aplo'mey "'aplo' mIw pol" je not Hotlu'.
 * ghItlh 'elDI' neH DIS jar je 'aplo'mey chenmoHlu' - 'aplo' chIm pagh.
 * jar = mIllogh/HaSta metadata mIllogh jaj → pagh ghItlh pong
   (`PXL_20261102_…`) → pagh ghItlh jaj.
 * Motion photos (`*.MP.jpg`), HEIC, PNG, … mIlloghmey 'oH; DNG RAW ghItlhmey latlh je `raw/`Daq jaH.
+* polghach 'aplo' = ghajwI' / HablI' (`Sam/Pixel 10 Pro`). mI' ngo' polghachmey
+  (`Pixel 10 Pro - Sam`) pa' SoH vIHlu'; cha' tu'lu'chugh, tay'moHlu' – pagh lajlu'be', pagh
+  teqlu'be'.
+* QInmey (`.txt` / `.html` / `.csv`) 'ej Qu' QIn Hutlhbogh rInpu'bogh tetlh `Logs` 'aplo'Daq jaH,
+  DIS 'aplo'mey retlhDaq. mI' ngo' QInmey polghach, lIHghach pagh lel veb retlhDaq pa' SoH vIHlu'.
 * jaj rapDaq cha'DIch QIn pongDaq rep chellu'.
 * pagh teqlu' reH: HablI'Daq pagh, polghachDaq pagh.
 * pong rap 'ach ngaS latlh → ghItlh chu' `name_1.jpg` pollu'. ngaS rap
@@ -311,8 +328,8 @@ cha' DuH lIngchoHlaH, rur HDD wa'Daq *Simple* 'ej latlhDaq *vav'a'-vav-puqloD*. 
 'aplo' Daj Suq:
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

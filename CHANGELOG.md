@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.8.3] - unreleased
+## [0.9.8.3] - 2026-11-11
 
 ### Phone app: new package name
 - **The phone app has a new Android package name (`io.github.machetso.mediabackup`) and version
@@ -17,6 +17,23 @@
 ### Privacy
 - *Versions and phone app* shows only the phone connected right now, never phones used before.
 - Examples in the manual, the changelog and the program use invented names only.
+
+### Backup folders per owner (user request 2026-11-09)
+- **A backup is now in `<Owner>/<Phone>`** (e.g. `Sam/Pixel 10 Pro`) instead of `Pixel 10 Pro - Sam`
+  – on every drive, in second-storage exports and on Google Drive. Existing backups are moved there
+  automatically; if both folders exist they are merged: identical files are recognised, nothing is
+  overwritten or deleted, a different file with the same name gets `_1`.
+
+### Reports and logs in a `Logs` folder (user request 2026-11-11)
+- **Reports (`.txt` / `.html` / `.csv`) are now saved in the subfolder `Logs`** of the folder that
+  holds the year folders – no more report files between `2025/`, `2026/` … The same for export and
+  restore reports.
+- **Job logs** (written when a backup, import, export, restore or clean-up ends without a report,
+  e.g. after an error) go there too. Google Drive jobs, or a drive that cannot be written, keep
+  using the program's own data folder.
+- **Reports of older versions are moved into `Logs` automatically** before the next backup, import
+  or export of that backup. Reports that an export copied as backed-up files stay where they are,
+  so a restore still finds them; nothing is overwritten.
 
 ### New month folders (user request 2026-11-09)
 - **Month folders are now named year + month: `2026/26.02` is February 2026.** Photos and videos
@@ -47,7 +64,7 @@
   earlier imports stay where they are.
 - A kept folder is never renamed by the new month-folder conversion (also when it looks like an
   old month folder, e.g. an old backup of this program kept 1:1).
-- Manual updated in English only so far; the other languages follow after testing.
+- Manual and program texts translated into all languages.
 
 ## [0.9.8.2] - 2026-11-07
 

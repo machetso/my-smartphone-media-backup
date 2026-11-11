@@ -7,7 +7,6 @@ are copied (the backup skips files that are already there).
 No Qt here - the GUI asks `check()` whether the button may be enabled.
 """
 
-import glob
 import os
 import re
 from datetime import datetime
@@ -79,7 +78,7 @@ def discover(cfg):
     version), read from their newest report. Old-phone imports are not phones to back up."""
     from .backup import backup_parent_name
     from .locations import find_backups
-    from .report import english
+    from .report import english, report_files
     known = cfg.setdefault("phones", {})
     hidden = set(cfg.get("phones_hidden", []))
     lb = cfg.get("last_backup")
@@ -91,8 +90,7 @@ def discover(cfg):
         key = key_of(parent)
         if key in known or key in hidden:
             continue
-        reports = sorted(glob.glob(os.path.join(glob.escape(parent), "Backup *.txt")),
-                         key=os.path.getmtime)
+        reports = sorted(report_files(parent), key=os.path.getmtime)
         if not reports:
             continue
         try:

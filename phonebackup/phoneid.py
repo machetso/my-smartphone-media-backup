@@ -118,7 +118,8 @@ def from_reports(parent):
     model, serials = "", []
     smartphone_re, serial_re = _smartphone_re(), _serial_re()
     try:
-        reports = sorted(Path(parent).glob("Backup *.txt"))
+        from .report import report_files
+        reports = sorted(report_files(parent), key=lambda p: p.name)
     except OSError:
         return None
     for r in reports:

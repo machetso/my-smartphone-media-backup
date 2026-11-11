@@ -885,7 +885,7 @@ class BackupsTabMixin:
         ui.title(tr("Import into %s", lastbackup.title({"owner": b["owner"], "phone": b["phone"]})))
         self.run_job(lambda: g.perform_selection_import(sel, parents, self.cfg, other_files=other,
                                                         interactive=True, cancel=self.cancel_event),
-                     self._import_done, awake=N_("Import"))
+                     self._import_done, awake=N_("Import"), log_dir=str(self.last_folder))
 
     def _import_done(self, res):
         status, paths, _results, verdict = res
@@ -1019,7 +1019,7 @@ class BackupsTabMixin:
         self.run_job(lambda: g.perform_old_phone_import(sel, phone, owner, dests, self.cfg,
                                                         other_files=other, interactive=True,
                                                         cancel=self.cancel_event),
-                     self._import_done, awake=N_("Import"))
+                     self._import_done, awake=N_("Import"), log_dir=str(self.last_folder))
 
 
 # =========================================================================== phone app (settings)

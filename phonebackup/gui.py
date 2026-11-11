@@ -1615,12 +1615,13 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
         return w
 
     # ------------------------------------------------------------------ jobs
-    def run_job(self, func, on_done, busy=True, awake=None):
-        """awake = name of a long job ("Backup", ...): the computer is kept from sleeping meanwhile."""
+    def run_job(self, func, on_done, busy=True, awake=None, log_dir=None):
+        """awake = name of a long job ("Backup", ...): the computer is kept from sleeping meanwhile.
+        log_dir = the backup folder the job works on: its job log goes into <log_dir>/Logs."""
         if busy:
             self._set_busy(True)
         if awake:                       # long job: summary + log file at the end
-            self._job = {"name": awake, "t0": time.monotonic(), "started": time.time(),
+            self._job = {"name": awake, "t0": time.monotonic(), "started": time.time(), "log_dir": log_dir,
                          "log_from": len(self.log.toPlainText().split("\n")) if self.log.toPlainText() else 0}
             ui.last_transfer = None
         keep = awake is not None and bool(self.cfg.get("keep_awake", True))
@@ -3002,7 +3003,7 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
                 if guard:
                     guard.end(switch_off=bool(self.cfg.get("debugging_off_after", True)))
 
-        self.run_job(job, self._backup_done, awake=N_("Backup"))
+        self.run_job(job, self._backup_done, awake=N_("Backup"), log_dir=self.last_folder)
 
     def _check_folders(self, src, folders, keep_list=True):
         """Folders of the list that are not on this phone (e.g. from another phone): say so and
@@ -3163,19 +3164,28 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
     def _save_job_log(self, outcome):
         """The window log of this job as a text file (also when the job stopped with an error)."""
         from .adbdownload import data_dir
+        from .report import logs_dir
         j = self._job
         lines = self.log.toPlainText().split("\n")[j["log_from"]:]
-        d = Path(data_dir()) / "logs"
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-            p = d / time.strftime(f"{j['name']} log %Y-%m-%d %H-%M-%S.txt", time.localtime(j["started"]))
-            p.write_text(f"{APP_NAME} – {tr(j['name'])} {outcome}\n"
-                         + "\n".join(f"  {x}" for x in self._job_summary()) + "\n\n"
-                         + "\n".join(lines) + "\n", encoding="utf-8")
-            return p
-        except OSError as e:
-            ui.warn(tr("Could not write the log file: %s", e))
-            return None
+        text = (f"{APP_NAME} – {tr(j['name'])} {outcome}\n"
+                + "\n".join(f"  {x}" for x in self._job_summary()) + "\n\n"
+                + "\n".join(lines) + "\n")
+        name = time.strftime(f"{j['name']} log %Y-%m-%d %H-%M-%S.txt", time.localtime(j["started"]))
+        # in the Logs folder of the backup (user request 2026-11-11); the app's data folder when
+        # there is none (Google Drive jobs) or the drive cannot be written (e.g. unplugged)
+        places = ([logs_dir(j["log_dir"])] if j.get("log_dir") and Path(j["log_dir"]).is_dir() else []) \
+            + [Path(data_dir()) / "logs"]
+        err = None
+        for d in places:
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+                p = d / name
+                p.write_text(text, encoding="utf-8")
+                return p
+            except OSError as e:
+                err = e
+        ui.warn(tr("Could not write the log file: %s", err))
+        return None
 
     def _finished(self, status, paths, verdict, what):
         html_reports = [p for p in paths if str(p).endswith(".html")]
@@ -3642,7 +3652,7 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
         ui.title(tr("Clean up %s", tparent))
         # deleting many GB on a HDD takes a while: in the background, computer kept awake
         self.run_job(lambda: remove_runs(tparent, ids), lambda res: self._cleanup_done(res, total),
-                     awake=N_("Clean up"))
+                     awake=N_("Clean up"), log_dir=str(tparent))
 
     def _confirm_cleanup(self, retire, sizes, where, after_export):
         if not retire:
@@ -3712,7 +3722,7 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
         self.last_folder = str(tparent)
         ui.title(tr("Export (%s) of %s", tr("Grandfather-Father-Son") if mode == "auto" else mode, src))
         self.run_job(lambda: perform_export(src, tgt, mode, self.cfg, cancel=self.cancel_event),
-                     self._export_done, awake=N_("Export"))
+                     self._export_done, awake=N_("Export"), log_dir=str(tparent))
 
     def _export_done(self, res):
         status, paths, verdict = res
@@ -3832,7 +3842,7 @@ class MainWindow(BackupsTabMixin, PhoneAppMixin, QMainWindow):
                          self._restore_done, awake=N_("Restore"))
             return
         self.run_job(lambda: perform_restore(tparent, run_id, dest, self.cfg, cancel=self.cancel_event),
-                     self._restore_done, awake=N_("Restore"))
+                     self._restore_done, awake=N_("Restore"), log_dir=dest)
 
     def _restore_done(self, res):
         status, paths, verdict = res

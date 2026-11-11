@@ -43,7 +43,7 @@ def valid_address(addr):
 
 @dataclass
 class MdnsService:
-    name: str       # e.g. adb-5A111FDCH0014T-AbCdEf
+    name: str       # e.g. adb-PX10TEST000001-AbCdEf
     kind: str       # PAIRING or CONNECT
     address: str    # ip:port
 
@@ -150,7 +150,7 @@ def _port_open(address, timeout=1.0):
 
 
 def service_serial(name):
-    """'adb-5A111FDCH0014T-AbCdEf' → '5A111FDCH0014T' ('' if it does not look like that)."""
+    """'adb-PX10TEST000001-AbCdEf' → 'PX10TEST000001' ('' if it does not look like that)."""
     if not name.startswith("adb-"):
         return ""
     return name[4:].rpartition("-")[0]

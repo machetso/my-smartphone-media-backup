@@ -110,7 +110,7 @@ disques connectés. *Tout sélectionner* / *Retirer de la liste* masquent des t�
   `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
   …) ou te permet d’en saisir un (*Tout sélectionner* / *Tout désélectionner*) ; *Retirer*.
   **Conserver la structure des dossiers du téléphone** (option) : les fichiers provenant d’autres dossiers que le dossier
-  de l’appareil photo atterrissent dans les mêmes dossiers dans la sauvegarde, p. ex. `Pixel 10 Pro - Sam/Pictures/Screenshots/` ;
+  de l’appareil photo atterrissent dans les mêmes dossiers dans la sauvegarde, p. ex. `Sam/Pixel 10 Pro/Pictures/Screenshots/` ;
   le dossier de l’appareil photo est toujours trié en dossiers année/mois. Les fichiers déjà sauvegardés restent
   là où ils sont ; les fichiers identiques ne sont toujours stockés qu’une seule fois.
 * **Destinations de sauvegarde** – la liste des disques de destination ; les noms de dossier longs peuvent défiler
@@ -136,21 +136,29 @@ rapide, comment la rendre plus rapide (câble + débogage USB ; câble USB 3 au 
 
 **Gérer les sauvegardes…** comporte quatre onglets :
 
-* **Importer une ancienne sauvegarde** – deux possibilités :
+* **Ancien disque / ancien téléphone** – sauvegarde les photos et vidéos d’un ancien disque dur ou d’un
+  ancien téléphone comme la sauvegarde d’un téléphone. Deux possibilités :
   * *Ajouter à une sauvegarde existante* – ajoute d’anciennes sauvegardes ou n’importe quels dossiers (photos et vidéos mélangées, RAW,
-    dossiers imbriqués, doublons) à l’une de tes sauvegardes, triés dans les mêmes dossiers année/mois.
-  * *Nouvelle sauvegarde d’un ancien téléphone* – l’ancien téléphone reçoit sa propre sauvegarde (« Galaxy S7 - Sam ») :
-    saisis le nom du téléphone et le propriétaire, et coche le ou les disques de destination.
+    dossiers imbriqués, doublons) à l’une de tes sauvegardes.
+  * *Nouvelle sauvegarde (ancien téléphone ou ancien disque)* – reçoit sa propre sauvegarde (p. ex. « Galaxy S7 - Sam » ou
+    « Ancien disque - Sam ») : saisis un nom et le propriétaire, et coche le ou les disques de destination.
 
-  Ajoute un ou plusieurs dossiers (p. ex. la copie de l’ancien téléphone et de sa carte SD) et clique sur
-  *Choisir les dossiers à importer…* : chaque dossier contenant des fichiers est listé avec ses photos / vidéos /
-  autres fichiers ; les données d’apps, caches, miniatures, corbeilles et dossiers cachés sont exclus. Coche les
-  dossiers et choisis pour chacun *Appareil photo* (→ dossiers année/mois) ou *Autre* (→ conserve son
-  dossier d’origine sous `Year/other/pictures | movies | other-files/`). Pour un ancien téléphone, les
-  dossiers de l’appareil photo et les dossiers normaux d’images/vidéos/téléchargements sont pré-cochés, les dossiers de messagerie et de
-  captures d’écran ne le sont pas. Chaque fichier est haché à la source et vérifié après écriture,
-  les fichiers identiques ne sont stockés qu’une seule fois (y compris par rapport à ce qui est déjà dans la sauvegarde), les anciens
-  dossiers sont seulement lus. Les fichiers ignorés sont listés dans le rapport « Import <nom> <date> ».
+  Ajoute un ou plusieurs dossiers (p. ex. la copie de l’ancien téléphone et de sa carte SD, ou les dossiers de photos
+  de l’ancien disque) et clique sur *Choisir les dossiers à importer…* : chaque dossier contenant des fichiers est listé avec
+  ses photos / vidéos / autres fichiers ; les données d’apps, caches, miniatures, corbeilles et dossiers cachés sont
+  exclus. Coche les dossiers et choisis pour chacun :
+  * *Trier dans les dossiers année/mois* – les photos et vidéos sont triées par date exactement comme dans la sauvegarde
+    d’un téléphone (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *Garder le dossier tel quel* – le dossier est copié 1:1, avec son nom et son chemin, en haut de la
+    sauvegarde (p. ex. `Urlaub Italien 2019/Tag 1/`). Chaque dossier est importé avec ses propres fichiers ; ses
+    sous-dossiers sont des lignes à part – coche-les aussi pour garder toute l’arborescence.
+
+  Pour un ancien téléphone, les dossiers de l’appareil photo sont proposés pour le tri, les dossiers normaux
+  d’images/vidéos/téléchargements pour être gardés tels quels ; les dossiers de messagerie et de captures d’écran ne sont pas
+  pré-cochés. Chaque fichier est haché à la source et vérifié après écriture, les fichiers identiques ne sont stockés
+  qu’une seule fois (y compris par rapport à ce qui est déjà dans la sauvegarde), les anciens dossiers sont seulement lus.
+  Les fichiers ignorés sont listés dans le rapport « Import <nom> <date> ». (Les imports faits avant la version 0.9.8.3
+  ont placé les dossiers gardés sous `Year/other/pictures | movies | other-files/` – ils y restent.)
 * **Second stockage (export)** – choisis la sauvegarde, un second disque ou **Google Drive** et le type
   d’export (*Automatique – Grand-père-Père-Fils* par défaut). Les exports précédents sont listés ; les anciens peuvent
   être nettoyés (seulement après ta confirmation). Voir *Second stockage* ci-dessous.
@@ -189,25 +197,34 @@ Si PySide6 est absent, `smartphone_media_backup.py` démarre automatiquement la 
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
 * Nom du dossier du mois = année + mois : `26.02` est février 2026. Les sauvegardes des versions
   précédentes (`02.February-photos` / `02.February-videos`) sont converties avant la prochaine
-  sauvegarde ou exportation – le programme affiche d’abord les anciens dossiers de mois et vous
-  décochez ceux qui doivent **garder leur nom et leur structure** (ils ne sont jamais modifiés). Le
+  sauvegarde ou exportation – le programme affiche d’abord les anciens dossiers de mois et tu
+  décoches ceux qui doivent **garder leur nom et leur structure** (ils ne sont jamais modifiés). Le
   choix vaut pour chaque disque et pour Google Drive ; les fichiers sont seulement déplacés, jamais
-  supprimés. Vos propres dossiers ne sont jamais touchés.
+  supprimés. Tes propres dossiers et les dossiers « garder la structure des dossiers » ne sont jamais
+  touchés.
 * Les dossiers d’année et de mois ne sont créés que lorsqu’un fichier y est placé - pas de dossiers vides.
 * Mois = date de prise de vue issue des métadonnées de la photo/vidéo → sinon le nom de fichier
   (`PXL_20261102_…`) → sinon la date du fichier.
 * Les photos animées (`*.MP.jpg`), HEIC, PNG, … comptent comme des photos ; les DNG et autres fichiers RAW vont dans `raw/`.
+* Dossier de sauvegarde = propriétaire / téléphone (`Sam/Pixel 10 Pro`). Les sauvegardes des versions
+  précédentes (`Pixel 10 Pro - Sam`) y sont déplacées automatiquement ; si les deux existent, elles sont
+  fusionnées – rien n’est écrasé ni supprimé.
+* Les rapports (`.txt` / `.html` / `.csv`) et le journal d’une tâche terminée sans rapport vont dans le
+  dossier `Logs`, à côté des dossiers d’année. Les rapports des versions précédentes y sont déplacés
+  automatiquement avant la prochaine sauvegarde, le prochain import ou le prochain export.
 * Un second rapport le même jour reçoit l’heure en plus dans son nom.
 * Rien n’est jamais supprimé : ni sur le téléphone, ni dans la sauvegarde.
 * Même nom mais contenu différent → le nouveau fichier est enregistré sous `name_1.jpg`. Un contenu identique
@@ -319,8 +336,8 @@ téléphone conserve le plan avec lequel il a été commencé.
 reçoit son propre dossier :
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

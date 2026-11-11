@@ -89,7 +89,8 @@ def split_old(name, cfg=None, folder=None):
 def _from_report(folder):
     from .lastbackup import _read_fields
     try:
-        reps = sorted(folder.glob("Backup *.txt"), key=lambda p: p.stat().st_mtime)
+        from .report import report_files
+        reps = sorted(report_files(folder), key=lambda p: p.stat().st_mtime)
         if not reps:
             return None
         f = _read_fields(reps[-1].read_text(encoding="utf-8", errors="replace")[:20000])

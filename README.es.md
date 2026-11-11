@@ -114,7 +114,7 @@ pestañas que se describen más abajo).
   `Download` …) o te permite escribir una (*Seleccionar todo* / *No seleccionar nada*); *Quitar*.
   **Mantener la estructura de carpetas del teléfono** (opción): los archivos de carpetas distintas
   de la carpeta de cámara van a las mismas carpetas en la copia, p. ej.
-  `Pixel 10 Pro - Sam/Pictures/Screenshots/`; la carpeta de cámara siempre se ordena en carpetas
+  `Sam/Pixel 10 Pro/Pictures/Screenshots/`; la carpeta de cámara siempre se ordena en carpetas
   de año/mes. Los archivos que ya están copiados se quedan donde están; los archivos idénticos se
   siguen guardando una sola vez.
 * **Destinos de la copia**: la lista de unidades de destino; los nombres de carpeta largos se pueden
@@ -141,23 +141,31 @@ depuración por USB; cable USB 3 en lugar de USB 2).
 
 **Gestionar copias…** tiene cuatro pestañas:
 
-* **Importar copia antigua**: dos formas:
+* **Disco antiguo / teléfono antiguo**: copia las fotos y los vídeos de un disco duro antiguo o de un
+  teléfono antiguo como si fuera la copia de un teléfono. Dos formas:
   * *Añadir a una copia existente*: añade copias antiguas o cualquier carpeta (fotos, vídeos y RAW
-    mezclados, carpetas anidadas, duplicados) a una de tus copias, ordenadas en las mismas carpetas
-    de año/mes.
-  * *Nueva copia de un teléfono antiguo*: el teléfono antiguo recibe su propia copia (“Galaxy S7 - Sam”):
-    introduce el nombre del teléfono y el propietario y marca la(s) unidad(es) de destino.
+    mezclados, carpetas anidadas, duplicados) a una de tus copias.
+  * *Nueva copia (teléfono o disco antiguo)*: recibe su propia copia (p. ej. “Galaxy S7 - Sam” u
+    “Old drive - Sam”): introduce un nombre y el propietario y marca la(s) unidad(es) de destino.
 
-  Añade una o varias carpetas (p. ej. la copia del teléfono antiguo y de su tarjeta SD) y haz clic en
-  *Elegir carpetas que importar…*: se muestra cada carpeta con archivos con sus fotos / vídeos /
-  otros archivos; los datos de apps, cachés, miniaturas, papelera y carpetas ocultas se omiten. Marca
-  las carpetas y elige para cada una *Cámara* (→ carpetas de año/mes) u *Otro* (→ conserva su
-  carpeta original en `Year/other/pictures | movies | other-files/`). En un teléfono antiguo, las
-  carpetas de cámara y las carpetas normales de imágenes/películas/descargas vienen marcadas de
-  antemano; las de mensajería y capturas de pantalla no. Cada archivo se calcula con hash en el
-  origen y se verifica después de escribirlo, los archivos idénticos se guardan una sola vez (también
-  frente a lo que ya está en la copia) y las carpetas antiguas solo se leen. Los archivos omitidos se
-  enumeran en el informe “Import <name> <date>”.
+  Añade una o varias carpetas (p. ej. la copia del teléfono antiguo y de su tarjeta SD, o las carpetas
+  de fotos del disco antiguo) y haz clic en *Elegir carpetas que importar…*: se muestra cada carpeta
+  con archivos con sus fotos / vídeos / otros archivos; los datos de apps, cachés, miniaturas,
+  papelera y carpetas ocultas se omiten. Marca las carpetas y elige para cada una:
+  * *Ordenar en carpetas de año/mes*: las fotos y los vídeos se ordenan por fecha exactamente igual
+    que en la copia de un teléfono (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *Dejar la carpeta tal como está*: la carpeta se copia 1:1, con su nombre y su ruta, al nivel
+    superior de la copia (p. ej. `Urlaub Italien 2019/Tag 1/`). Cada carpeta se importa con sus
+    propios archivos; sus subcarpetas son líneas aparte: márcalas también para conservar todo el
+    árbol de carpetas.
+
+  En un teléfono antiguo, las carpetas de cámara se proponen para ordenar y las carpetas normales de
+  imágenes/películas/descargas para dejarlas tal como están; las de mensajería y capturas de pantalla
+  no vienen marcadas. Cada archivo se calcula con hash en el origen y se verifica después de
+  escribirlo, los archivos idénticos se guardan una sola vez (también frente a lo que ya está en la
+  copia) y las carpetas antiguas solo se leen. Los archivos omitidos se enumeran en el informe
+  “Import <name> <date>”. (Las importaciones hechas antes de la versión 0.9.8.3 ponían las carpetas
+  conservadas en `Year/other/pictures | movies | other-files/`; allí se quedan.)
 * **Segundo almacenamiento (exportación)**: elige la copia, una segunda unidad o **Google Drive** y el
   tipo de exportación (*Automático – Abuelo-Padre-Hijo* por defecto). Las exportaciones anteriores
   aparecen en una lista; las antiguas se pueden limpiar (solo después de que lo confirmes). Consulta
@@ -201,24 +209,33 @@ Si falta PySide6, `smartphone_media_backup.py` inicia automáticamente la versi�
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
 * Nombre de la carpeta del mes = año + mes: `26.02` es febrero de 2026. Las copias de versiones
   anteriores (`02.February-photos` / `02.February-videos`) se convierten antes de la siguiente
   copia o exportación – antes el programa muestra las carpetas de mes antiguas y desmarcas las que
   deben **conservar su nombre y estructura** (nunca se cambian). La elección vale para cada disco y
-  para Google Drive; los archivos solo se mueven, nunca se borran. Tus propias carpetas nunca se tocan.
+  para Google Drive; los archivos solo se mueven, nunca se borran. Tus propias carpetas y las carpetas
+  de "mantener la estructura de carpetas" nunca se tocan.
 * Las carpetas de año y mes solo se crean cuando un archivo va a parar a ellas: no hay carpetas vacías.
 * Mes = fecha de captura de los metadatos de la foto/vídeo → si no, el nombre del archivo
   (`PXL_20261102_…`) → si no, la fecha del archivo.
 * Las fotos con movimiento (`*.MP.jpg`), HEIC, PNG, … cuentan como fotos; DNG y otros archivos RAW van a `raw/`.
+* Carpeta de copia = propietario / teléfono (`Sam/Pixel 10 Pro`). Las copias de versiones anteriores
+  (`Pixel 10 Pro - Sam`) se mueven allí automáticamente; si existen ambas, se unen: no se sobrescribe
+  ni se borra nada.
+* Los informes (`.txt` / `.html` / `.csv`) y el registro de una tarea que terminó sin informe van a
+  la carpeta `Logs`, junto a las carpetas de año. Los informes de versiones anteriores se mueven allí
+  automáticamente antes de la siguiente copia, importación o exportación.
 * Un segundo informe del mismo día lleva la hora añadida a su nombre.
 * Nunca se borra nada: ni en el teléfono ni en la copia.
 * Mismo nombre pero contenido distinto → el archivo nuevo se guarda como `name_1.jpg`. El contenido
@@ -332,8 +349,8 @@ carpeta de teléfono conserva el plan con el que se empezó.
 Drive. Cada exportación tiene su propia carpeta:
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

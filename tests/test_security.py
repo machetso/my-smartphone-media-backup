@@ -288,7 +288,7 @@ class WifiAutoConnectTest(unittest.TestCase):
             tried.clear()
             self.assertEqual(wireless.auto_connect("adb", "", []), "")
             self.assertEqual(tried, [])
-        self.assertEqual(wireless.service_serial("adb-5A111FDCH0014T-AbCdEf"), "5A111FDCH0014T")
+        self.assertEqual(wireless.service_serial("adb-PX10TEST000001-AbCdEf"), "PX10TEST000001")
 
 
 if __name__ == "__main__":

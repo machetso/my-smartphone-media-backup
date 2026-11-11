@@ -30,6 +30,20 @@ from .i18n import N_, tr, trp
 from .layout import safe_name
 from .safety import csv_cell
 
+# Reports and logs go into this subfolder of the folder that holds the year folders (2026/, ...)
+# – user request 2026-11-11; before, they were written next to the year folders.
+LOGS_DIR = "Logs"
+
+
+def logs_dir(folder) -> Path:
+    return Path(folder) / LOGS_DIR
+
+
+def report_files(folder, pattern="Backup *.txt"):
+    """Reports of a backup folder: in Logs/ and (backups made before 2026-11-11) next to the year folders."""
+    folder = Path(folder)
+    return list(logs_dir(folder).glob(pattern)) + list(folder.glob(pattern))
+
 
 class Shown(str):
     """English text (for comparisons, the catalog, tests) that also knows its shown form."""

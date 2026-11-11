@@ -110,7 +110,7 @@ conectate. *Selectează tot* / *Elimină din listă* ascund telefoanele (backup-
   `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
   …) sau te lasă să scrii unul (*Selectează tot* / *Deselectează tot*); *Elimină*.
   **Păstrează structura de foldere a telefonului** (opțiune): fișierele din alte foldere decât folderul
-  camerei ajung în aceleași foldere în backup, ex. `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
+  camerei ajung în aceleași foldere în backup, ex. `Sam/Pixel 10 Pro/Pictures/Screenshots/`;
   folderul camerei este întotdeauna sortat în foldere an/lună. Fișierele deja salvate rămân
   unde sunt; fișierele identice sunt în continuare stocate o singură dată.
 * **Destinații backup** – lista unităților de destinație; numele lungi de foldere pot fi derulate
@@ -136,21 +136,29 @@ rapidă, cum o poți face mai rapidă (cablu + depanare USB; cablu USB 3 în loc
 
 **Gestionează backup-urile…** are patru file:
 
-* **Importă backup vechi** – două variante:
+* **Disc vechi / telefon vechi** – face backup fotografiilor și videoclipurilor unui hard disk vechi sau ale unui
+  telefon vechi ca unui backup de telefon. Două variante:
   * *Adaugă la un backup existent* – adaugă backup-uri vechi sau orice foldere (fotografii, videoclipuri, RAW amestecate,
-    foldere imbricate, duplicate) la unul dintre backup-urile tale, sortate în aceleași foldere an/lună.
-  * *Backup nou al unui telefon vechi* – telefonul vechi primește un backup propriu („Galaxy S7 - Sam”):
-    introdu numele telefonului și proprietarul și bifează unitatea (unitățile) de destinație.
+    foldere imbricate, duplicate) la unul dintre backup-urile tale.
+  * *Backup nou (telefon vechi sau disc vechi)* – primește un backup propriu (ex. „Galaxy S7 - Sam” sau
+    „Disc vechi - Sam”): introdu un nume și proprietarul și bifează unitatea (unitățile) de destinație.
 
-  Adaugă unul sau mai multe foldere (ex. copia telefonului vechi și a cardului său SD) și fă clic pe
-  *Alege folderele de importat…*: fiecare folder cu fișiere este listat cu fotografiile / videoclipurile /
-  celelalte fișiere ale sale; datele aplicațiilor, cache-urile, miniaturile, coșul de gunoi și folderele ascunse sunt omise. Bifează
-  folderele și alege pentru fiecare *Cameră* (→ foldere an/lună) sau *Altele* (→ își păstrează
-  folderul original sub `Year/other/pictures | movies | other-files/`). Pentru un telefon vechi, folderele
-  camerei și folderele normale de imagini/filme/descărcări sunt bifate dinainte, folderele de mesagerie și de
-  capturi de ecran nu. Fiecărui fișier i se calculează hash-ul la sursă și este verificat după scriere,
-  fișierele identice sunt stocate o singură dată (inclusiv față de ce există deja în backup), iar folderele
-  vechi sunt doar citite. Fișierele omise sunt listate în raportul „Import <nume> <dată>”.
+  Adaugă unul sau mai multe foldere (ex. copia telefonului vechi și a cardului său SD sau folderele cu fotografii
+  de pe discul vechi) și fă clic pe *Alege folderele de importat…*: fiecare folder cu fișiere este listat cu
+  fotografiile / videoclipurile / celelalte fișiere ale sale; datele aplicațiilor, cache-urile, miniaturile, coșul de gunoi
+  și folderele ascunse sunt omise. Bifează folderele și alege pentru fiecare:
+  * *Sortează în foldere an/lună* – fotografiile și videoclipurile sunt sortate după dată exact ca într-un backup
+    de telefon (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *Păstrează folderul așa cum este* – folderul este copiat 1:1, cu numele și calea sa, în partea de sus a
+    backup-ului (ex. `Urlaub Italien 2019/Tag 1/`). Fiecare folder este importat cu propriile fișiere, subfolderele
+    sale sunt rânduri separate – bifează-le și pe ele pentru a păstra tot arborele de foldere.
+
+  Pentru un telefon vechi, folderele camerei sunt propuse pentru sortare, iar folderele normale de imagini/filme/descărcări
+  pentru păstrare; folderele de mesagerie și de capturi de ecran nu sunt bifate dinainte. Fiecărui fișier i se calculează
+  hash-ul la sursă și este verificat după scriere, fișierele identice sunt stocate o singură dată (inclusiv față de ce
+  există deja în backup), iar folderele vechi sunt doar citite. Fișierele omise sunt listate în raportul
+  „Import <nume> <dată>”. (Importurile făcute înainte de versiunea 0.9.8.3 au pus folderele păstrate sub
+  `Year/other/pictures | movies | other-files/` – ele rămân acolo.)
 * **Al doilea spațiu de stocare (export)** – alege backup-ul, o a doua unitate sau **Google Drive** și tipul de
   export (implicit *Automat – Bunic-Tată-Fiu*). Exporturile anterioare sunt listate; cele vechi pot
   fi curățate (doar după ce confirmi). Vezi *Al doilea spațiu de stocare* mai jos.
@@ -189,24 +197,33 @@ Dacă PySide6 lipsește, `smartphone_media_backup.py` pornește automat versiune
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
 * Numele folderului lunii = an + lună: `26.02` este februarie 2026. Backupurile versiunilor mai
   vechi (`02.February-photos` / `02.February-videos`) sunt convertite înainte de următorul backup sau
   export – mai întâi programul arată folderele vechi de lună și le debifezi pe cele care trebuie să
   **își păstreze numele și structura** (nu sunt schimbate niciodată). Alegerea se aplică fiecărui
-  disc și Google Drive; fișierele sunt doar mutate, niciodată șterse. Folderele tale nu sunt atinse.
+  disc și Google Drive; fișierele sunt doar mutate, niciodată șterse. Folderele tale și folderele cu
+  „păstrează structura de foldere” nu sunt atinse niciodată.
 * Folderele pentru ani și luni sunt create doar când un fișier ajunge în ele - fără foldere goale.
 * Luna = data capturii din metadatele fotografiei/videoclipului → altfel numele fișierului
   (`PXL_20261102_…`) → altfel data fișierului.
 * Fotografiile în mișcare (`*.MP.jpg`), HEIC, PNG, … contează ca fotografii; DNG și alte fișiere RAW ajung în `raw/`.
+* Folderul de backup = proprietar / telefon (`Sam/Pixel 10 Pro`). Backup-urile făcute cu versiuni mai vechi
+  (`Pixel 10 Pro - Sam`) sunt mutate automat acolo; dacă există amândouă, sunt combinate – nimic nu este
+  suprascris sau șters.
+* Rapoartele (`.txt` / `.html` / `.csv`) și jurnalul unei sarcini care s-a încheiat fără raport ajung în folderul
+  `Logs`, lângă folderele anilor. Rapoartele versiunilor mai vechi sunt mutate automat acolo înainte de următorul
+  backup, import sau export.
 * Un al doilea raport în aceeași zi primește ora adăugată la nume.
 * Nu se șterge niciodată nimic: nici pe telefon, nici în backup.
 * Același nume, dar conținut diferit → noul fișier este salvat ca `name_1.jpg`. Conținutul identic
@@ -318,8 +335,8 @@ telefon păstrează planul cu care a fost început.
 primește propriul folder:
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

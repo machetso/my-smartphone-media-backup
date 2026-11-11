@@ -110,7 +110,7 @@ Laufwerken gefunden. *Alle auswählen* / *Aus Liste entfernen* blenden Telefone 
   `DCIM/Screenshots`, WhatsApp `Android/media/com.whatsapp/WhatsApp/Media`, `Movies`, `Download`
   …) oder lässt dich einen eintippen (*Alle auswählen* / *Keine auswählen*); *Entfernen*.
   **Ordnerstruktur des Telefons beibehalten** (Option): Dateien aus anderen Ordnern als dem Kamera-
-  ordner landen im Backup in denselben Ordnern, z. B. `Pixel 10 Pro - Sam/Pictures/Screenshots/`;
+  ordner landen im Backup in denselben Ordnern, z. B. `Sam/Pixel 10 Pro/Pictures/Screenshots/`;
   der Kameraordner wird immer in Jahres-/Monatsordner sortiert. Bereits gesicherte Dateien bleiben,
   wo sie sind; identische Dateien werden weiterhin nur einmal gespeichert.
 * **Backup-Ziele** – die Liste der Ziellaufwerke; lange Ordnernamen lassen sich
@@ -137,21 +137,29 @@ schnellste ist, wie es schneller geht (Kabel + USB-Debugging; USB-3-Kabel statt 
 
 **Backups verwalten…** hat vier Tabs:
 
-* **Altes Backup importieren** – zwei Wege:
+* **Altes Laufwerk / altes Handy** – sichert die Fotos und Videos einer alten Festplatte oder eines alten
+  Telefons wie ein Telefon-Backup. Zwei Wege:
   * *Zu einem vorhandenen Backup hinzufügen* – fügt alte Backups oder beliebige Ordner (gemischte Fotos, Videos, RAW,
-    verschachtelte Ordner, Duplikate) zu einem deiner Backups hinzu, sortiert in dieselben Jahres-/Monatsordner.
-  * *Neues Backup eines alten Telefons* – das alte Telefon bekommt ein eigenes Backup („Galaxy S7 - Sam“):
-    Telefonname und Besitzer eingeben und das oder die Ziellaufwerke anhaken.
+    verschachtelte Ordner, Duplikate) zu einem deiner Backups hinzu.
+  * *Neues Backup (altes Handy oder altes Laufwerk)* – bekommt ein eigenes Backup (z. B. „Galaxy S7 - Sam“ oder
+    „Alte Festplatte - Sam“): einen Namen und den Besitzer eingeben und das oder die Ziellaufwerke anhaken.
 
-  Füge einen oder mehrere Ordner hinzu (z. B. die Kopie des alten Telefons und seiner SD-Karte) und klicke auf
-  *Zu importierende Ordner wählen…*: Jeder Ordner mit Dateien wird mit seinen Fotos / Videos /
-  sonstigen Dateien aufgelistet; App-Daten, Caches, Vorschaubilder, Papierkorb und versteckte Ordner werden ausgelassen. Hake die
-  Ordner an und wähle für jeden *Kamera* (→ Jahres-/Monatsordner) oder *Sonstige* (→ behält seinen
-  ursprünglichen Ordner unter `Year/other/pictures | movies | other-files/`). Bei einem alten Telefon sind die
-  Kameraordner und normale Bild-/Film-/Download-Ordner vorab angehakt, Messenger- und
-  Screenshot-Ordner nicht. Jede Datei wird an der Quelle gehasht und nach dem Schreiben geprüft,
-  identische Dateien werden nur einmal gespeichert (auch im Abgleich mit dem, was schon im Backup ist), die alten
-  Ordner werden nur gelesen. Übersprungene Dateien stehen im Bericht „Import <name> <date>“.
+  Füge einen oder mehrere Ordner hinzu (z. B. die Kopie des alten Telefons und seiner SD-Karte oder die Fotoordner
+  des alten Laufwerks) und klicke auf *Zu importierende Ordner wählen…*: Jeder Ordner mit Dateien wird mit seinen
+  Fotos / Videos / sonstigen Dateien aufgelistet; App-Daten, Caches, Vorschaubilder, Papierkorb und versteckte Ordner
+  werden ausgelassen. Hake die Ordner an und wähle für jeden:
+  * *In Jahres-/Monatsordner sortieren* – die Fotos und Videos werden genau wie bei einem Telefon-Backup nach Datum
+    sortiert (`2019/19.07`, RAW → `2019/raw/19.07`).
+  * *Ordner so lassen, wie er ist* – der Ordner wird 1:1 mit Namen und Pfad oben ins Backup kopiert
+    (z. B. `Urlaub Italien 2019/Tag 1/`). Jeder Ordner wird mit seinen eigenen Dateien importiert, seine
+    Unterordner sind eigene Zeilen – hake sie ebenfalls an, um den ganzen Ordnerbaum zu behalten.
+
+  Bei einem alten Telefon werden die Kameraordner zum Sortieren vorgeschlagen, normale Bild-/Film-/Download-Ordner
+  zum Beibehalten; Messenger- und Screenshot-Ordner sind nicht vorab angehakt. Jede Datei wird an der Quelle gehasht
+  und nach dem Schreiben geprüft, identische Dateien werden nur einmal gespeichert (auch im Abgleich mit dem, was
+  schon im Backup ist), die alten Ordner werden nur gelesen. Übersprungene Dateien stehen im Bericht
+  „Import <name> <date>“. (Importe vor Version 0.9.8.3 haben beibehaltene Ordner unter
+  `Year/other/pictures | movies | other-files/` abgelegt – dort bleiben sie.)
 * **Zweitspeicher (Export)** – wähle das Backup, ein zweites Laufwerk oder **Google Drive** und die Export-
   art (standardmäßig *Automatisch – Großvater-Vater-Sohn*). Frühere Exporte werden aufgelistet; alte können
   aufgeräumt werden (nur nach deiner Bestätigung). Siehe *Zweitspeicher* weiter unten.
@@ -190,13 +198,15 @@ Fehlt PySide6, startet `smartphone_media_backup.py` automatisch die Terminal-Ver
 
 ```
 PhoneBackups/
-└── Pixel 10 Pro - Sam/                  ← backup parent folder (one per phone + owner)
-    ├── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv   ← report
-    ├── 2026/
-    │   ├── 26.01/  …  26.12/                    (photos + videos of each month)
-    │   ├── raw/26.01/ …  raw/26.12/             (only if RAW/DNG files exist)
-    │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
-    └── .phonebackup/index.sqlite                 ← what is already backed up (do not delete)
+└── Sam/                                     ← one folder per owner
+    └── Pixel 10 Pro/                        ← the backup of this phone
+        ├── Logs/                            ← reports and logs
+        │   └── Backup Pixel 10 Pro Sam 2026-11-02.txt / .html / .csv
+        ├── 2026/
+        │   ├── 26.01/  …  26.12/            (photos + videos of each month)
+        │   ├── raw/26.01/ …  raw/26.12/     (only if RAW/DNG files exist)
+        │   └── other/pictures|movies|other-files/<original folder>/   (only old phone imports)
+        └── .phonebackup/index.sqlite        ← what is already backed up (do not delete)
 ```
 
 * Name des Monatsordners = Jahr + Monat: `26.02` ist Februar 2026. Backups älterer Versionen
@@ -209,6 +219,12 @@ PhoneBackups/
 * Monat = Aufnahmedatum aus den Foto-/Video-Metadaten → sonst der Dateiname
   (`PXL_20261102_…`) → sonst das Dateidatum.
 * Bewegte Fotos (`*.MP.jpg`), HEIC, PNG, … zählen als Fotos; DNG und andere RAW-Dateien kommen nach `raw/`.
+* Backup-Ordner = Besitzer / Telefon (`Sam/Pixel 10 Pro`). Backups älterer Versionen
+  (`Pixel 10 Pro - Sam`) werden automatisch dorthin verschoben; gibt es beide, werden sie zusammengeführt – nichts
+  wird überschrieben oder gelöscht.
+* Berichte (`.txt` / `.html` / `.csv`) und das Protokoll eines Auftrags, der ohne Bericht endete, kommen in den
+  Ordner `Logs` neben den Jahresordnern. Berichte älterer Versionen werden vor dem nächsten Backup, Import oder
+  Export automatisch dorthin verschoben.
 * Ein zweiter Bericht am selben Tag bekommt die Uhrzeit an den Namen angehängt.
 * Es wird nie etwas gelöscht: nicht auf dem Telefon, nicht im Backup.
 * Gleicher Name, aber anderer Inhalt → die neue Datei wird als `name_1.jpg` gespeichert. Identischer Inhalt
@@ -319,8 +335,8 @@ ordner behält den Plan, mit dem er begonnen wurde.
 bekommt einen eigenen Ordner:
 
 ```
-PhoneBackups-Export/Pixel 10 Pro - Sam/
-├── 2026-11-02_14-30-00_full/
+PhoneBackups-Export/Sam/Pixel 10 Pro/
+├── 2026-11-02_14-30-00_full/            (with the export report in Logs/)
 ├── 2026-11-20_09-12-45_incremental/
 ├── 2026-12-01_18-03-10_differential/
 └── .phonebackup-export/catalog.sqlite

@@ -14,7 +14,7 @@ from .copier import Cancelled, sha256_file, stream_copy
 from .index import INTERNAL_DIR, BackupIndex
 from .layout import keep_structure_placement, relative_dir, safe_name, unique_path
 from .media import CATEGORY_LABEL, category_for, detect_date
-from .report import both, shown, unique_basename, write_reports
+from .report import both, logs_dir, shown, unique_basename, write_reports
 from .sources import PhoneHasher
 
 MIN_FREE = 50 * 1024 * 1024     # a drive with less free space than this counts as full
@@ -518,7 +518,7 @@ def _write_backup_reports(source, phone_name, owner, folders, missing, dests, re
     paths = []
     basename = None
     for d in dests:
-        rdir = d.report_dir
+        rdir = logs_dir(d.report_dir)
         try:
             if basename is None or (rdir / (basename + ".txt")).exists():
                 basename = unique_basename(rdir, report_base, started)
